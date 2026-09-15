@@ -676,12 +676,20 @@ details > p { color: var(--muted); margin-top: 8px; font-size: 12px; }
     .timeframe-selector {
         width: 100%;
         display: flex;
-        justify-content: space-between;
+        overflow-x: auto;
+        justify-content: flex-start;
+        gap: 3px;
+        padding: 4px 2px;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+    }
+    .timeframe-selector::-webkit-scrollbar {
+        display: none;
     }
     .tf-pill {
-        flex: 1;
-        text-align: center;
-        padding: 6px 2px;
+        flex: 0 0 auto;
+        padding: 6px 9px;
+        font-size: 11px;
     }
     .ticker-right {
         width: 100%;

@@ -172,11 +172,17 @@ def generate_crypto_candles(symbol, current_price, timeframe="5y", days=None):
     """Fetch real historical candlestick data from Binance or fallback to calibrated generator."""
     tf = (timeframe or "5y").lower().strip()
     config = {
-        "5y": ("1w", 260),
+        "1m": ("1m", 100),
+        "5m": ("5m", 100),
+        "10m": ("5m", 200),
+        "30m": ("30m", 100),
+        "1h": ("1h", 100),
+        "8h": ("8h", 100),
+        "1d": ("1d", 100),
+        "7d": ("1w", 100),
+        "1w": ("1w", 100),
         "1y": ("1d", 365),
-        "1m": ("1d", 30),
-        "1w": ("4h", 42),
-        "1d": ("15m", 96),
+        "5y": ("1w", 260),
     }
     interval, limit = config.get(tf, ("1d", int(days or 45)))
     cache_key = f"{symbol.upper()}:{tf}"
@@ -184,6 +190,8 @@ def generate_crypto_candles(symbol, current_price, timeframe="5y", days=None):
     now = time.time()
     if cached and (now - cached["ts"] < 300):
         return cached["candles"]
+
+    is_intraday = tf in ("1m", "5m", "10m", "30m", "1h", "8h")
 
     # Try Binance klines
     try:
@@ -193,18 +201,38 @@ def generate_crypto_candles(symbol, current_price, timeframe="5y", days=None):
         if resp.status_code == 200:
             data = resp.json()
             if isinstance(data, list) and len(data) > 0:
-                candles = []
-                for item in data:
-                    c_time = datetime.fromtimestamp(item[0] / 1000).strftime("%Y-%m-%d") if interval in ("1w", "1d") else int(item[0] / 1000)
-                    o, h, l, c = float(item[1]), float(item[2]), float(item[3]), float(item[4])
-                    dec = 4 if c < 1 else 2
-                    candles.append({
-                        "time": c_time,
-                        "open": round(o, dec),
-                        "high": round(h, dec),
-                        "low": round(l, dec),
-                        "close": round(c, dec),
-                    })
+                if tf == "10m" and len(data) >= 2:
+                    if len(data) % 2 != 0:
+                        data = data[1:]
+                    candles = []
+                    for i in range(0, len(data), 2):
+                        c1, c2 = data[i], data[i + 1]
+                        c_time = int(c1[0] / 1000)
+                        o = float(c1[1])
+                        h = max(float(c1[2]), float(c2[2]))
+                        l = min(float(c1[3]), float(c2[3]))
+                        c = float(c2[4])
+                        dec = 4 if c < 1 else 2
+                        candles.append({
+                            "time": c_time,
+                            "open": round(o, dec),
+                            "high": round(h, dec),
+                            "low": round(l, dec),
+                            "close": round(c, dec),
+                        })
+                else:
+                    candles = []
+                    for item in data:
+                        c_time = int(item[0] / 1000) if is_intraday else datetime.fromtimestamp(item[0] / 1000).strftime("%Y-%m-%d")
+                        o, h, l, c = float(item[1]), float(item[2]), float(item[3]), float(item[4])
+                        dec = 4 if c < 1 else 2
+                        candles.append({
+                            "time": c_time,
+                            "open": round(o, dec),
+                            "high": round(h, dec),
+                            "low": round(l, dec),
+                            "close": round(c, dec),
+                        })
                 if candles:
                     _crypto_candle_cache[cache_key] = {"candles": candles, "ts": now}
                     return candles
@@ -214,9 +242,18 @@ def generate_crypto_candles(symbol, current_price, timeframe="5y", days=None):
     # Offline calibrated generator fallback
     seed = sum(ord(character) for character in symbol) + 41
     price = float(current_price) * (0.90 + (seed % 8) / 100)
-    count = limit
+    count = 100 if tf == "10m" else limit
     candles = []
-    is_weekly = (interval == "1w")
+    step_map = {
+        "1m": 60,
+        "5m": 300,
+        "10m": 600,
+        "30m": 1800,
+        "1h": 3600,
+        "8h": 28800,
+    }
+    is_weekly = tf in ("7d", "1w", "5y")
+    curr_sec = int(now)
     for index in range(count):
         drift = (((seed + index * 19) % 21) - 10) / 170
         open_price = price
@@ -224,7 +261,10 @@ def generate_crypto_candles(symbol, current_price, timeframe="5y", days=None):
         high_price = max(open_price, close_price) * (1.008 + ((seed + index) % 4) / 1000)
         low_price = min(open_price, close_price) * (0.992 - ((seed + index) % 3) / 1000)
         dec = 4 if close_price < 1 else 2
-        if is_weekly:
+        if is_intraday:
+            step = step_map.get(tf, 300)
+            candle_time = curr_sec - (count - index - 1) * step
+        elif is_weekly:
             candle_time = (date.today() - timedelta(weeks=count - index - 1)).isoformat()
         else:
             candle_time = (date.today() - timedelta(days=count - index - 1)).isoformat()
