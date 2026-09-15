@@ -27,7 +27,10 @@ CRYPTO = [
 
 
 def _get_cache_ttl():
-    return int(os.environ.get("PRICE_CACHE_TTL_SECONDS", "60"))
+    try:
+        return int(os.environ.get("PRICE_CACHE_TTL_SECONDS") or 60)
+    except (ValueError, TypeError):
+        return 60
 
 
 def _fetch_binance_quote(symbol):
