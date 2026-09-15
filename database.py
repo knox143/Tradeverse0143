@@ -72,6 +72,26 @@ def format_duration(seconds):
     return f"{days}d"
 
 
+_tables_initialized = False
+
+
+def ensure_tables():
+    """Ensure schema exists before queries run in ephemeral serverless environments."""
+    global _tables_initialized
+    if _tables_initialized:
+        return
+    _tables_initialized = True
+    try:
+        db_path = get_database_path()
+        with closing(sqlite3.connect(str(db_path), timeout=10.0)) as conn:
+            row = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'").fetchone()
+            if not row:
+                _init_database_tables()
+    except Exception as e:
+        _tables_initialized = False
+        sys.stderr.write(f"ensure_tables notice: {e}\n")
+
+
 def get_connection():
     """Open a SQLite connection configured to return dictionary-like rows."""
     db_path = get_database_path()
@@ -85,6 +105,8 @@ def get_connection():
             os.chmod(str(db_path), 0o666)
         except Exception:
             pass
+
+    ensure_tables()
 
     connection = sqlite3.connect(str(db_path), timeout=30.0)
     connection.row_factory = sqlite3.Row
