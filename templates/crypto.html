@@ -69,7 +69,16 @@
                         <span class="currency-pill usdt">USDT</span>
                         <span id="crypto-studio-pair" class="pair-tag">BTC/USDT</span>
                     </div>
-                    <small id="crypto-studio-subtitle">Binance Real-Time OHLCV Daily Candlesticks</small>
+                    <small id="crypto-studio-subtitle">5-Year Historical & Live Weekly/Daily Candlesticks</small>
+                </div>
+            </div>
+            <div class="ticker-controls">
+                <div class="timeframe-selector" id="crypto-timeframe-selector">
+                    <button type="button" class="tf-pill" data-timeframe="1d">1D</button>
+                    <button type="button" class="tf-pill" data-timeframe="1w">1W</button>
+                    <button type="button" class="tf-pill" data-timeframe="1m">1M</button>
+                    <button type="button" class="tf-pill" data-timeframe="1y">1Y</button>
+                    <button type="button" class="tf-pill is-active" data-timeframe="5y">5Y</button>
                 </div>
             </div>
             <div class="ticker-right">
@@ -79,9 +88,9 @@
                 </button>
             </div>
         </div>
-        <div id="crypto-studio-canvas" class="chart-canvas studio-canvas" data-chart data-asset-type="crypto" data-symbol="BTC"></div>
+        <div id="crypto-studio-canvas" class="chart-canvas studio-canvas" data-chart data-asset-type="crypto" data-symbol="BTC" data-timeframe="5y"></div>
         <div class="chart-foot">
-            <span>Daily OHLCV Candles via Binance Public API</span>
+            <span>5-Year & Multi-Timeframe OHLCV Candles via Binance Public API</span>
             <span><i data-lucide="mouse-pointer"></i> Scroll to zoom &bull; Drag to pan</span>
         </div>
     </div>

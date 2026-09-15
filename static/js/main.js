@@ -230,8 +230,10 @@
     }
 
     /** Render a real-time candlestick chart in any container for any symbol. */
-    async function renderCandlestickChart(container, assetType, symbol) {
+    async function renderCandlestickChart(container, assetType, symbol, timeframe) {
         if (!window.LightweightCharts || !container || !assetType || !symbol) return;
+        const tf = timeframe || container.dataset.timeframe || (assetType === "crypto" ? "5y" : "1y");
+        container.dataset.timeframe = tf;
 
         // Clean up any existing chart in container
         if (activeChartsMap.has(container)) {
@@ -241,11 +243,12 @@
             } catch (e) {}
             activeChartsMap.delete(container);
         }
-        container.innerHTML = `<div class="chart-loading"><i data-lucide="loader-2"></i><span>Loading ${symbol} candlesticks...</span></div>`;
+        const tfLabel = tf.toUpperCase();
+        container.innerHTML = `<div class="chart-loading"><i data-lucide="loader-2"></i><span>Loading ${symbol} (${tfLabel}) candlesticks...</span></div>`;
         refreshIcons();
 
         try {
-            const response = await fetch(`/api/chart/${encodeURIComponent(assetType)}/${encodeURIComponent(symbol)}`);
+            const response = await fetch(`/api/chart/${encodeURIComponent(assetType)}/${encodeURIComponent(symbol)}?timeframe=${encodeURIComponent(tf)}`);
             const result = await response.json();
             if (!result.ok || !result.candles || result.candles.length === 0) {
                 throw new Error(result.message || "No candle data available");
@@ -361,8 +364,25 @@
         const priceElem = document.getElementById("crypto-studio-price");
         const iconElem = document.getElementById("crypto-studio-icon");
         const tradeBtn = document.getElementById("crypto-studio-trade-btn");
+        let currentSymbol = "BTC";
+        let currentTimeframe = "5y";
+
+        // Setup timeframe selector buttons
+        const tfSelector = document.getElementById("crypto-timeframe-selector");
+        if (tfSelector) {
+            tfSelector.querySelectorAll(".tf-pill").forEach((btn) => {
+                btn.addEventListener("click", () => {
+                    tfSelector.querySelectorAll(".tf-pill").forEach((b) => b.classList.remove("is-active"));
+                    btn.classList.add("is-active");
+                    currentTimeframe = btn.dataset.timeframe || "5y";
+                    canvas.dataset.timeframe = currentTimeframe;
+                    renderCandlestickChart(canvas, "crypto", currentSymbol, currentTimeframe);
+                });
+            });
+        }
 
         function activateCoin(symbol, name, price) {
+            currentSymbol = symbol;
             studio.querySelectorAll(".asset-pill").forEach((pill) => {
                 pill.classList.toggle("is-active", pill.dataset.symbol === symbol);
             });
@@ -382,7 +402,7 @@
                 tradeBtn.innerHTML = `<i data-lucide="arrow-up-right"></i>Trade ${symbol}`;
             }
             refreshIcons();
-            renderCandlestickChart(canvas, "crypto", symbol);
+            renderCandlestickChart(canvas, "crypto", symbol, currentTimeframe);
         }
 
         // Handle pill clicks

@@ -168,57 +168,69 @@ def list_crypto(query=""):
         return list(executor.map(_refresh, filtered))
 
 
-def generate_crypto_candles(symbol, current_price, days=45):
+def generate_crypto_candles(symbol, current_price, timeframe="5y", days=None):
     """Fetch real historical candlestick data from Binance or fallback to calibrated generator."""
-    cached = _crypto_candle_cache.get(symbol)
+    tf = (timeframe or "5y").lower().strip()
+    config = {
+        "5y": ("1w", 260),
+        "1y": ("1d", 365),
+        "1m": ("1d", 30),
+        "1w": ("4h", 42),
+        "1d": ("15m", 96),
+    }
+    interval, limit = config.get(tf, ("1d", int(days or 45)))
+    cache_key = f"{symbol.upper()}:{tf}"
+    cached = _crypto_candle_cache.get(cache_key)
     now = time.time()
     if cached and (now - cached["ts"] < 300):
         return cached["candles"]
 
-    # Try Binance daily klines
+    # Try Binance klines
     try:
         ticker_sym = f"{symbol.upper()}USDT"
-        url = f"https://api.binance.com/api/v3/klines?symbol={ticker_sym}&interval=1d&limit={days}"
-        resp = _crypto_session.get(url, timeout=(2.5, 3.5))
+        url = f"https://api.binance.com/api/v3/klines?symbol={ticker_sym}&interval={interval}&limit={limit}"
+        resp = _crypto_session.get(url, timeout=(2.0, 3.0))
         if resp.status_code == 200:
             data = resp.json()
-        if isinstance(data, list) and len(data) > 0:
-            candles = []
-            for item in data:
-                # [open_time, open, high, low, close, volume, ...]
-                candle_time = datetime.fromtimestamp(item[0] / 1000).strftime("%Y-%m-%d")
-                o = float(item[1])
-                h = float(item[2])
-                l = float(item[3])
-                c = float(item[4])
-                dec = 4 if c < 1 else 2
-                candles.append({
-                    "time": candle_time,
-                    "open": round(o, dec),
-                    "high": round(h, dec),
-                    "low": round(l, dec),
-                    "close": round(c, dec),
-                })
-            if candles:
-                _crypto_candle_cache[symbol] = {"candles": candles, "ts": now}
-                return candles
+            if isinstance(data, list) and len(data) > 0:
+                candles = []
+                for item in data:
+                    c_time = datetime.fromtimestamp(item[0] / 1000).strftime("%Y-%m-%d") if interval in ("1w", "1d") else int(item[0] / 1000)
+                    o, h, l, c = float(item[1]), float(item[2]), float(item[3]), float(item[4])
+                    dec = 4 if c < 1 else 2
+                    candles.append({
+                        "time": c_time,
+                        "open": round(o, dec),
+                        "high": round(h, dec),
+                        "low": round(l, dec),
+                        "close": round(c, dec),
+                    })
+                if candles:
+                    _crypto_candle_cache[cache_key] = {"candles": candles, "ts": now}
+                    return candles
     except Exception:
         pass
 
     # Offline calibrated generator fallback
     seed = sum(ord(character) for character in symbol) + 41
     price = float(current_price) * (0.90 + (seed % 8) / 100)
+    count = limit
     candles = []
-    for index in range(days):
+    is_weekly = (interval == "1w")
+    for index in range(count):
         drift = (((seed + index * 19) % 21) - 10) / 170
         open_price = price
         close_price = max(0.0001, open_price * (1 + drift))
         high_price = max(open_price, close_price) * (1.008 + ((seed + index) % 4) / 1000)
         low_price = min(open_price, close_price) * (0.992 - ((seed + index) % 3) / 1000)
         dec = 4 if close_price < 1 else 2
+        if is_weekly:
+            candle_time = (date.today() - timedelta(weeks=count - index - 1)).isoformat()
+        else:
+            candle_time = (date.today() - timedelta(days=count - index - 1)).isoformat()
         candles.append(
             {
-                "time": (date.today() - timedelta(days=days - index - 1)).isoformat(),
+                "time": candle_time,
                 "open": round(open_price, dec),
                 "high": round(high_price, dec),
                 "low": round(low_price, dec),
@@ -226,6 +238,7 @@ def generate_crypto_candles(symbol, current_price, days=45):
             }
         )
         price = close_price
+    _crypto_candle_cache[cache_key] = {"candles": candles, "ts": now}
     return candles
 
 

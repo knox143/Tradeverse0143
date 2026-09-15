@@ -90,12 +90,15 @@ def ensure_tables():
     if _tables_initialized:
         return
     _tables_initialized = True
+    needs_init = False
     try:
         db_path = get_database_path()
-        with closing(sqlite3.connect(str(db_path), timeout=10.0)) as conn:
+        with closing(sqlite3.connect(str(db_path), timeout=5.0)) as conn:
             row = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'").fetchone()
             if not row:
-                _init_database_tables()
+                needs_init = True
+        if needs_init:
+            _init_database_tables()
     except Exception as e:
         _tables_initialized = False
         sys.stderr.write(f"ensure_tables notice: {e}\n")

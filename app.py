@@ -67,7 +67,9 @@ def login_required(view_function):
     """Redirect unauthenticated visitors to login before protected views run."""
     @wraps(view_function)
     def wrapped_view(*args, **kwargs):
-        if "user_id" not in session:
+        user_id = session.get("user_id")
+        if not user_id or not get_user_by_id(user_id):
+            session.clear()
             flash("Please sign in to use TradeVerse.", "warning")
             return redirect(url_for("login"))
         return view_function(*args, **kwargs)
@@ -605,12 +607,16 @@ def market_search():
 @app.get("/api/chart/<asset_type>/<symbol>")
 @login_required
 def chart_data(asset_type, symbol):
-    """Return chart-compatible demo candles for a supported stock or crypto symbol."""
+    """Return chart-compatible candles for a supported stock or crypto symbol."""
     quote = quote_for_asset(symbol, asset_type)
     if quote is None:
         return jsonify({"ok": False, "message": "Symbol not found."}), 404
-    candles = generate_crypto_candles(symbol, quote["price"]) if asset_type == "crypto" else generate_candles(symbol, quote["price"])
-    return jsonify({"ok": True, "symbol": quote["symbol"], "candles": candles})
+    timeframe = request.args.get("timeframe", "5y" if asset_type == "crypto" else "1y").lower().strip()
+    if asset_type == "crypto":
+        candles = generate_crypto_candles(symbol, quote["price"], timeframe=timeframe)
+    else:
+        candles = generate_candles(symbol, quote["price"])
+    return jsonify({"ok": True, "symbol": quote["symbol"], "timeframe": timeframe, "candles": candles})
 
 
 @app.get("/api/portfolio/summary")

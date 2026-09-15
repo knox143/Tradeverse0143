@@ -3,7 +3,7 @@
 {% block content %}
 <section class="dashboard-intro">
     <div>
-        <h2>Good to see you, {{ current_user['full_name'].split()[0] }}.</h2>
+        <h2>Good to see you, {{ (current_user['full_name'] if current_user and current_user['full_name'] else 'Trader').split()[0] }}.</h2>
         <p>Paper trade Indian stocks in INR and Global & Crypto in USDT with authentic brand vector symbols and trade duration tracking.</p>
     </div>
     <div style="display: flex; gap: 10px;">
