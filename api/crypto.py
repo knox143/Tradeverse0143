@@ -170,7 +170,16 @@ def list_crypto(query=""):
 
 def generate_crypto_candles(symbol, current_price, timeframe="5y", days=None):
     """Fetch real historical candlestick data from Binance or fallback to calibrated generator."""
-    tf = (timeframe or "5y").lower().strip()
+    tf_raw = (timeframe or "5y").strip()
+    if tf_raw in ("1M", "1mo", "1month"):
+        tf = "1mo"
+    elif tf_raw in ("3M", "3mo", "3months"):
+        tf = "3mo"
+    elif tf_raw in ("6M", "6mo", "6months"):
+        tf = "6mo"
+    else:
+        tf = tf_raw.lower()
+
     config = {
         "1m": ("1m", 100),
         "5m": ("5m", 100),
@@ -181,6 +190,9 @@ def generate_crypto_candles(symbol, current_price, timeframe="5y", days=None):
         "1d": ("1d", 100),
         "7d": ("1w", 100),
         "1w": ("1w", 100),
+        "1mo": ("1d", 30),
+        "3mo": ("1d", 90),
+        "6mo": ("1d", 180),
         "1y": ("1d", 365),
         "5y": ("1w", 260),
     }

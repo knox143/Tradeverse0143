@@ -611,7 +611,7 @@ def chart_data(asset_type, symbol):
     quote = quote_for_asset(symbol, asset_type)
     if quote is None:
         return jsonify({"ok": False, "message": "Symbol not found."}), 404
-    timeframe = request.args.get("timeframe", "5y" if asset_type == "crypto" else "1y").lower().strip()
+    timeframe = request.args.get("timeframe", "5y" if asset_type == "crypto" else "1y").strip()
     if asset_type == "crypto":
         candles = generate_crypto_candles(symbol, quote["price"], timeframe=timeframe)
     else:
