@@ -11,13 +11,42 @@ from werkzeug.security import generate_password_hash
 
 BASE_DIRECTORY = Path(__file__).resolve().parent
 SEED_DATABASE_PATH = BASE_DIRECTORY / "database" / "tradeverse.db"
-IS_VERCEL = bool(os.environ.get("VERCEL") or os.environ.get("VERCEL_ENV"))
 
-if IS_VERCEL:
-    # On Vercel serverless functions, only /tmp is writable
-    DATABASE_PATH = Path("/tmp/tradeverse.db")
-else:
-    DATABASE_PATH = SEED_DATABASE_PATH
+
+def is_serverless_env():
+    """Determine if running in Vercel or a read-only serverless container."""
+    if os.environ.get("VERCEL") or os.environ.get("VERCEL_ENV") or os.environ.get("AWS_LAMBDA_FUNCTION_NAME"):
+        return True
+    try:
+        check_file = BASE_DIRECTORY / ".write_check"
+        check_file.touch()
+        check_file.unlink()
+        return False
+    except Exception:
+        return True
+
+
+def get_database_path():
+    """Return writable DB path, copying seed DB to /tmp in serverless environments."""
+    if is_serverless_env():
+        tmp_db = Path("/tmp/tradeverse.db")
+        if not tmp_db.exists() or tmp_db.stat().st_size == 0:
+            try:
+                tmp_db.parent.mkdir(parents=True, exist_ok=True)
+                if SEED_DATABASE_PATH.exists():
+                    # copyfile does NOT copy read-only attributes, ensuring writable DB
+                    shutil.copyfile(str(SEED_DATABASE_PATH), str(tmp_db))
+                else:
+                    tmp_db.touch()
+            except Exception as err:
+                sys.stderr.write(f"Warning initializing /tmp database: {err}\n")
+        try:
+            os.chmod(str(tmp_db), 0o666)
+        except Exception:
+            pass
+        return tmp_db
+    return SEED_DATABASE_PATH
+
 
 STARTING_INR_BALANCE = 1_000_000.00
 STARTING_USDT_BALANCE = 10_000.00
@@ -45,18 +74,26 @@ def format_duration(seconds):
 
 def get_connection():
     """Open a SQLite connection configured to return dictionary-like rows."""
-    if IS_VERCEL and not DATABASE_PATH.exists():
-        try:
-            DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
-            if SEED_DATABASE_PATH.exists():
-                shutil.copy2(SEED_DATABASE_PATH, DATABASE_PATH)
-        except Exception as err:
-            print(f"Warning: could not copy seed database to /tmp: {err}")
+    db_path = get_database_path()
+    try:
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
 
-    DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(DATABASE_PATH)
+    if is_serverless_env() and db_path.exists():
+        try:
+            os.chmod(str(db_path), 0o666)
+        except Exception:
+            pass
+
+    connection = sqlite3.connect(str(db_path), timeout=30.0)
     connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA foreign_keys = ON")
+    try:
+        connection.execute("PRAGMA foreign_keys = ON")
+        connection.execute("PRAGMA journal_mode = DELETE")
+        connection.execute("PRAGMA busy_timeout = 10000")
+    except Exception:
+        pass
     return connection
 
 
@@ -151,6 +188,13 @@ def _migrate_database(connection):
 
 def init_database():
     """Create the normalized application tables and seed reusable learning data."""
+    try:
+        _init_database_tables()
+    except Exception as err:
+        print(f"Notice during init_database: {err}")
+
+
+def _init_database_tables():
     schema = """
     CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -383,9 +427,12 @@ def create_user(full_name, email, password):
             return user_id
         except sqlite3.IntegrityError as error:
             connection.rollback()
-            if "users.email" in str(error):
+            if "email" in str(error).lower() or "unique" in str(error).lower():
                 raise ValueError("An account already exists for that email address.") from error
-            raise
+            raise ValueError(f"Registration failed: {error}") from error
+        except sqlite3.Error as error:
+            connection.rollback()
+            raise ValueError(f"Database error during registration: {error}") from error
 
 
 def get_user_by_email(email):

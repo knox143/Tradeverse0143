@@ -224,3 +224,9 @@ def generate_crypto_candles(symbol, current_price, days=45):
         )
         price = close_price
     return candles
+
+
+# Vercel serverless fallback handler
+def handler(*args, **kwargs):
+    from app import app
+    return app(*args, **kwargs)

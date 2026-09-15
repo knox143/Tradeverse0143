@@ -4,6 +4,9 @@ import os
 from functools import wraps
 
 from flask import Flask, flash, jsonify, redirect, render_template, request, session, url_for
+from pathlib import Path
+import sys
+import traceback
 from werkzeug.security import check_password_hash
 
 from api.crypto import generate_crypto_candles, get_crypto_quote, list_crypto
@@ -34,13 +37,22 @@ from database import (
 )
 
 
-app = Flask(__name__)
+BASE_DIR = Path(__file__).resolve().parent
+app = Flask(
+    __name__,
+    template_folder=str(BASE_DIR / "templates"),
+    static_folder=str(BASE_DIR / "static"),
+)
 app.config.update(
-    SECRET_KEY=os.environ.get("TRADEVERSE_SECRET_KEY", "change-this-local-secret-before-deploying"),
+    SECRET_KEY=os.environ.get("TRADEVERSE_SECRET_KEY", "tradeverse-secure-session-key-2026"),
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
 )
-init_database()
+
+try:
+    init_database()
+except Exception as err:
+    sys.stderr.write(f"Notice: init_database caught exception on start: {err}\n")
 
 
 def login_required(view_function):
@@ -220,6 +232,9 @@ def register():
                 return redirect(url_for("dashboard"))
             except ValueError as error:
                 flash(str(error), "error")
+            except Exception as error:
+                sys.stderr.write(f"Registration error: {error}\n{traceback.format_exc()}\n")
+                flash("Could not complete registration. Please try again.", "error")
     return render_template("register.html", page_name="Create account")
 
 
@@ -231,13 +246,17 @@ def login():
     if request.method == "POST":
         email = request.form.get("email", "")
         password = request.form.get("password", "")
-        user = get_user_by_email(email)
-        if user and check_password_hash(user["password_hash"], password):
-            session.clear()
-            session["user_id"] = user["id"]
-            flash(f"Welcome back, {user['full_name'].split()[0]}.", "success")
-            return redirect(url_for("dashboard"))
-        flash("That email and password combination was not recognized.", "error")
+        try:
+            user = get_user_by_email(email)
+            if user and check_password_hash(user["password_hash"], password):
+                session.clear()
+                session["user_id"] = user["id"]
+                flash(f"Welcome back, {user['full_name'].split()[0]}.", "success")
+                return redirect(url_for("dashboard"))
+            flash("That email and password combination was not recognized.", "error")
+        except Exception as error:
+            sys.stderr.write(f"Login error: {error}\n{traceback.format_exc()}\n")
+            flash("Sign in service temporarily unavailable. Please try again.", "error")
     return render_template("login.html", page_name="Sign in")
 
 

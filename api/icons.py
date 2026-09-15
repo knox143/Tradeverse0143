@@ -248,3 +248,9 @@ def get_market_pair(symbol: str, currency: str = "") -> str:
     if not currency:
         currency = "INR" if (sym.endswith(".NS") or sym.endswith(".BO")) else "USDT"
     return f"{clean_sym}/{currency}"
+
+
+# Vercel serverless fallback handler
+def handler(*args, **kwargs):
+    from app import app
+    return app(*args, **kwargs)
