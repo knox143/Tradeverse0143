@@ -1,0 +1,167 @@
+<!-- Market table for Indian and global equities with official brand symbols, Stock Chart Studio, and trade actions. -->
+{% extends 'base.html' %}
+{% block content %}
+<section class="market-page-intro">
+    <div>
+        <p class="eyebrow">Equities market &bull; Dual Currency</p>
+        <h2>Indian & Global Stocks Studio</h2>
+        <p>Live real-time quotes for Indian Stock Market (NSE in INR ₹) and Global Equities (USDT). Every company features its authentic brand symbol badge.</p>
+    </div>
+    <span class="data-label"><i data-lucide="activity"></i>Live Real-Time Market Feed</span>
+</section>
+
+<!-- Stock Chart Studio: Candlestick Chart for Every Stock -->
+<section class="chart-studio-section" id="stock-chart-studio">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Technical Analysis</p>
+            <h2>Stock Candlestick Studio</h2>
+            <p>Inspect real-time daily candlestick patterns for Indian NSE stocks (INR) and US/Global equities (USDT).</p>
+        </div>
+        <div class="chart-legend">
+            <span><i class="legend-win"></i>Bullish Candle</span>
+            <span style="margin-left:8px;"><i class="legend-loss"></i>Bearish Candle</span>
+        </div>
+    </div>
+
+    <div class="chart-asset-selector" id="stock-chart-pills">
+        <button type="button" class="asset-pill is-active" data-studio-select data-symbol="RELIANCE.NS" data-name="Reliance Industries" data-asset-type="stock" data-currency="INR" data-price="{% for s in stocks %}{% if s.symbol == 'RELIANCE.NS' %}{{ s.price }}{% endif %}{% endfor %}">
+            <span class="pill-icon">{{ 'RELIANCE.NS'|asset_icon('stock', 24) }}</span>
+            <span><strong>RELIANCE</strong><small>NSE &bull; INR ₹</small></span>
+        </button>
+        <button type="button" class="asset-pill" data-studio-select data-symbol="TCS.NS" data-name="Tata Consultancy Services" data-asset-type="stock" data-currency="INR" data-price="{% for s in stocks %}{% if s.symbol == 'TCS.NS' %}{{ s.price }}{% endif %}{% endfor %}">
+            <span class="pill-icon">{{ 'TCS.NS'|asset_icon('stock', 24) }}</span>
+            <span><strong>TCS</strong><small>NSE &bull; INR ₹</small></span>
+        </button>
+        <button type="button" class="asset-pill" data-studio-select data-symbol="HDFCBANK.NS" data-name="HDFC Bank" data-asset-type="stock" data-currency="INR" data-price="{% for s in stocks %}{% if s.symbol == 'HDFCBANK.NS' %}{{ s.price }}{% endif %}{% endfor %}">
+            <span class="pill-icon">{{ 'HDFCBANK.NS'|asset_icon('stock', 24) }}</span>
+            <span><strong>HDFCBANK</strong><small>NSE &bull; INR ₹</small></span>
+        </button>
+        <button type="button" class="asset-pill" data-studio-select data-symbol="INFY.NS" data-name="Infosys" data-asset-type="stock" data-currency="INR" data-price="{% for s in stocks %}{% if s.symbol == 'INFY.NS' %}{{ s.price }}{% endif %}{% endfor %}">
+            <span class="pill-icon">{{ 'INFY.NS'|asset_icon('stock', 24) }}</span>
+            <span><strong>INFY</strong><small>NSE &bull; INR ₹</small></span>
+        </button>
+        <button type="button" class="asset-pill" data-studio-select data-symbol="AAPL" data-name="Apple Inc." data-asset-type="stock" data-currency="USDT" data-price="{% for s in stocks %}{% if s.symbol == 'AAPL' %}{{ s.price }}{% endif %}{% endfor %}">
+            <span class="pill-icon">{{ 'AAPL'|asset_icon('stock', 24) }}</span>
+            <span><strong>AAPL</strong><small>Apple &bull; USDT</small></span>
+        </button>
+        <button type="button" class="asset-pill" data-studio-select data-symbol="MSFT" data-name="Microsoft" data-asset-type="stock" data-currency="USDT" data-price="{% for s in stocks %}{% if s.symbol == 'MSFT' %}{{ s.price }}{% endif %}{% endfor %}">
+            <span class="pill-icon">{{ 'MSFT'|asset_icon('stock', 24) }}</span>
+            <span><strong>MSFT</strong><small>Microsoft &bull; USDT</small></span>
+        </button>
+        <button type="button" class="asset-pill" data-studio-select data-symbol="TSLA" data-name="Tesla" data-asset-type="stock" data-currency="USDT" data-price="{% for s in stocks %}{% if s.symbol == 'TSLA' %}{{ s.price }}{% endif %}{% endfor %}">
+            <span class="pill-icon">{{ 'TSLA'|asset_icon('stock', 24) }}</span>
+            <span><strong>TSLA</strong><small>Tesla &bull; USDT</small></span>
+        </button>
+        <button type="button" class="asset-pill" data-studio-select data-symbol="NVDA" data-name="NVIDIA" data-asset-type="stock" data-currency="USDT" data-price="{% for s in stocks %}{% if s.symbol == 'NVDA' %}{{ s.price }}{% endif %}{% endfor %}">
+            <span class="pill-icon">{{ 'NVDA'|asset_icon('stock', 24) }}</span>
+            <span><strong>NVDA</strong><small>NVIDIA &bull; USDT</small></span>
+        </button>
+    </div>
+
+    <div class="studio-chart-wrapper">
+        <div class="studio-ticker-bar">
+            <div class="ticker-left">
+                <span id="stock-studio-icon" class="studio-icon-wrap">{{ 'RELIANCE.NS'|asset_icon('stock', 36) }}</span>
+                <div>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <h3 id="stock-studio-title">Reliance Industries (RELIANCE.NS)</h3>
+                        <span id="stock-studio-currency" class="currency-pill inr">INR</span>
+                        <span id="stock-studio-pair" class="pair-tag">RELIANCE/INR</span>
+                    </div>
+                    <small id="stock-studio-subtitle">Live Daily Candlesticks via Yahoo Finance</small>
+                </div>
+            </div>
+            <div class="ticker-right">
+                <span class="ticker-price" id="stock-studio-price">-- INR</span>
+                <button type="button" class="primary-button compact js-trade" id="stock-studio-trade-btn" data-symbol="RELIANCE.NS" data-name="Reliance Industries" data-asset-type="stock" data-currency="INR" data-price="1257.50">
+                    <i data-lucide="arrow-up-right"></i>Trade Stock
+                </button>
+            </div>
+        </div>
+        <div id="stock-studio-canvas" class="chart-canvas studio-canvas" data-chart data-asset-type="stock" data-symbol="RELIANCE.NS"></div>
+        <div class="chart-foot">
+            <span>Daily OHLCV Candles via Yahoo Finance Market Data</span>
+            <span><i data-lucide="mouse-pointer"></i> Scroll to zoom &bull; Drag to pan</span>
+        </div>
+    </div>
+</section>
+
+<section class="market-controls" aria-label="Stock filters">
+    <form method="get" class="search-form">
+        <label class="sr-only" for="stock-search">Search stocks</label>
+        <i data-lucide="search"></i>
+        <input id="stock-search" name="query" type="search" value="{{ query }}" placeholder="Search by company name or ticker">
+        <input type="hidden" name="market" value="{{ selected_market }}">
+    </form>
+    <div class="filter-tabs">
+        <a class="filter-tab {% if selected_market == 'All' %}is-active{% endif %}" href="{{ url_for('stocks', market='All', query=query) }}">All</a>
+        <a class="filter-tab {% if selected_market == 'India' %}is-active{% endif %}" href="{{ url_for('stocks', market='India', query=query) }}">Indian stocks (INR ₹)</a>
+        <a class="filter-tab {% if selected_market == 'Global' %}is-active{% endif %}" href="{{ url_for('stocks', market='Global', query=query) }}">Global stocks (USDT)</a>
+    </div>
+</section>
+
+<section class="market-table-section">
+    <div class="section-heading">
+        <div>
+            <h2>Market directory</h2>
+            <p>{{ stocks|length }} instruments available &bull; Featuring official company symbol badges and market pairs</p>
+        </div>
+    </div>
+    {% if stocks %}
+    <div class="table-wrap">
+        <table class="market-table">
+            <thead>
+                <tr>
+                    <th>Company & Symbol</th>
+                    <th>Market Pair</th>
+                    <th>Sector</th>
+                    <th class="numeric">Live Price</th>
+                    <th class="numeric">24h move</th>
+                    <th aria-label="Chart">Chart</th>
+                    <th aria-label="Watchlist"></th>
+                    <th aria-label="Trade"></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for stock in stocks %}
+                <tr data-search-row>
+                    <td>
+                        <div class="instrument-cell">
+                            <span class="instrument-icon-wrap">{{ stock.symbol|asset_icon('stock', 32) }}</span>
+                            <span><strong>{{ stock.name }}</strong><small>{{ stock.symbol }} &bull; <span class="market-pill" style="font-size:9px; padding:1px 4px;">{{ stock.market }}</span></small></span>
+                        </div>
+                    </td>
+                    <td><span class="pair-tag">{{ stock.symbol|market_pair(stock.currency) }}</span></td>
+                    <td>{{ stock.sector }}</td>
+                    <td class="numeric"><strong>{{ stock.price|currency_val(stock.currency) }}</strong></td>
+                    <td class="numeric"><b class="{% if stock.change >= 0 %}positive{% else %}negative{% endif %}">{{ stock.change|signed }}%</b></td>
+                    <td>
+                        <button class="table-action js-view-chart" type="button" data-symbol="{{ stock.symbol }}" data-name="{{ stock.name }}" data-asset-type="stock" data-currency="{{ stock.currency }}" data-price="{{ stock.price }}" title="View {{ stock.symbol }} candlestick chart">
+                            <i data-lucide="candlestick-chart"></i> Chart
+                        </button>
+                    </td>
+                    <td>
+                        <button class="icon-button js-watchlist {% if 'stock:' + stock.symbol in watchlist_keys %}is-saved{% endif %}" type="button" aria-label="Toggle {{ stock.symbol }} in watchlist" data-symbol="{{ stock.symbol }}" data-asset-type="stock">
+                            <i data-lucide="star"></i>
+                        </button>
+                    </td>
+                    <td>
+                        <button class="table-action js-trade" type="button" data-symbol="{{ stock.symbol }}" data-name="{{ stock.name }}" data-asset-type="stock" data-currency="{{ stock.currency }}" data-price="{{ stock.price }}">
+                            Trade <i data-lucide="arrow-up-right"></i>
+                        </button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <i data-lucide="search-x"></i>
+        <p>No stocks match that search.</p>
+        <a href="{{ url_for('stocks') }}">Clear search</a>
+    </div>
+    {% endif %}
+</section>
+{% endblock %}

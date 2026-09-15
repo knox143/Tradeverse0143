@@ -1,0 +1,31 @@
+<!-- Registration page that creates a local account and virtual wallet. -->
+{% extends 'base.html' %}
+{% block content %}
+<section class="auth-panel">
+    <div class="auth-brand"><span class="brand-mark" aria-hidden="true"><i data-lucide="candlestick-chart"></i></span><strong>Trade<span>Verse</span></strong></div>
+    <p class="eyebrow">Create your practice space</p>
+    <h1>Build an investing routine you can trust.</h1>
+    <p class="auth-copy">Every account begins with virtual credits. No bank details and no real orders.</p>
+    <form method="post" class="auth-form" novalidate>
+        <label class="field-label" for="full_name">Full name</label>
+        <input class="field-input" id="full_name" name="full_name" type="text" autocomplete="name" required autofocus>
+        <label class="field-label" for="email">Email address</label>
+        <input class="field-input" id="email" name="email" type="email" autocomplete="email" required>
+        <label class="field-label" for="password">Password</label>
+        <input class="field-input" id="password" name="password" type="password" autocomplete="new-password" minlength="8" required>
+        <label class="field-label" for="confirm_password">Confirm password</label>
+        <input class="field-input" id="confirm_password" name="confirm_password" type="password" autocomplete="new-password" minlength="8" required>
+        <button class="primary-button full-button" type="submit"><i data-lucide="sparkles"></i>Create account</button>
+    </form>
+    <p class="auth-switch">Already practicing? <a href="{{ url_for('login') }}">Sign in</a></p>
+</section>
+<aside class="auth-aside register-aside" aria-label="Account benefits">
+    <div class="aside-brand">TradeVerse</div>
+    <div class="practice-list">
+        <div><i data-lucide="wallet-cards"></i><span><strong>Virtual wallet</strong>Practice with ₹10,00,000 INR & 10,000 USDT.</span></div>
+        <div><i data-lucide="chart-no-axes-combined"></i><span><strong>Multi-asset market</strong>Explore Indian, global, and crypto quotes.</span></div>
+        <div><i data-lucide="graduation-cap"></i><span><strong>Learning loop</strong>Turn trades into better future decisions.</span></div>
+    </div>
+    <p class="aside-footer">Less noise. More deliberate practice.</p>
+</aside>
+{% endblock %}

@@ -1,0 +1,8 @@
+<!-- Learning library page with a locally generated editorial illustration. -->
+{% extends 'base.html' %}
+{% block content %}
+<section class="learning-hero"><div class="learning-copy"><p class="eyebrow">Financial learning</p><h2>Make the practice count.</h2><p>Short, practical lessons for the thinking behind a good paper trade.</p><a class="primary-button" href="{{ url_for('quiz') }}"><i data-lucide="circle-help"></i>Take weekly quiz</a></div><img src="{{ url_for('static', filename='images/' + featured.image_path) }}" alt="Investor studying a market chart at a desk" class="learning-image"></section>
+<section class="lesson-toolbar"><div><p class="eyebrow">Learning path</p><h2>Start where you are.</h2></div><span class="data-label"><i data-lucide="book-open-check"></i>{{ modules|length }} lessons</span></section>
+<section class="lesson-grid">{% for module in modules %}<article class="lesson-card"><div class="lesson-card-top"><span class="lesson-category">{{ module.category }}</span><i data-lucide="bookmark"></i></div><h3>{{ module.title }}</h3><p>{{ module.description }}</p><div class="lesson-meta"><span><i data-lucide="clock-3"></i>{{ module.read_time }}</span><span><i data-lucide="signal"></i>{{ module.difficulty }}</span></div><details><summary>Read key idea <i data-lucide="arrow-down"></i></summary><p>{{ module.content }}</p></details></article>{% endfor %}</section>
+<section class="learning-footer"><i data-lucide="lightbulb"></i><div><p class="eyebrow">Practice prompt</p><h2>Before your next trade, write the reason in one sentence.</h2></div><a class="text-link" href="{{ url_for('stocks') }}">Open market <i data-lucide="arrow-right"></i></a></section>
+{% endblock %}

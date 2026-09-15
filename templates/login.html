@@ -1,0 +1,27 @@
+<!-- Login page for an existing TradeVerse paper-trading account. -->
+{% extends 'base.html' %}
+{% block content %}
+<section class="auth-panel">
+    <div class="auth-brand"><span class="brand-mark" aria-hidden="true"><i data-lucide="candlestick-chart"></i></span><strong>Trade<span>Verse</span></strong></div>
+    <p class="eyebrow">Virtual markets. Real habits.</p>
+    <h1>Practice the decisions before they matter.</h1>
+    <p class="auth-copy">Trade stocks and crypto with a virtual wallet, then learn from every move.</p>
+    <form method="post" class="auth-form" novalidate>
+        <label class="field-label" for="email">Email address</label>
+        <input class="field-input" id="email" name="email" type="email" autocomplete="email" required autofocus>
+        <div class="label-row"><label class="field-label" for="password">Password</label><a href="{{ url_for('forgot_password') }}">Forgot password?</a></div>
+        <input class="field-input" id="password" name="password" type="password" autocomplete="current-password" required>
+        <button class="primary-button full-button" type="submit"><i data-lucide="log-in"></i>Sign in</button>
+    </form>
+    <p class="auth-switch">New to TradeVerse? <a href="{{ url_for('register') }}">Create your account</a></p>
+</section>
+<aside class="auth-aside" aria-label="TradeVerse preview">
+    <div class="aside-brand">TradeVerse</div>
+    <div class="market-tape"><span>RELIANCE.NS</span><strong>+0.84%</strong><span>BTC</span><strong>+1.86%</strong><span>NVDA</span><strong>+2.26%</strong></div>
+    <div class="auth-value-card">
+        <p>Start with</p><strong style="font-size: 18px;">₹10,00,000 INR & 10,000 USDT</strong><span>virtual trading credits</span>
+        <div class="mini-chart" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+    </div>
+    <p class="aside-footer">A patient place to get better at investing.</p>
+</aside>
+{% endblock %}

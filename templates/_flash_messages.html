@@ -1,0 +1,10 @@
+<!-- Server-rendered status notices stay accessible even when JavaScript is unavailable. -->
+{% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+    <div class="flash-stack" aria-live="polite">
+        {% for category, message in messages %}
+        <div class="flash-message flash-{{ category }}"><i data-lucide="{% if category == 'success' %}check-circle-2{% elif category == 'error' %}circle-alert{% else %}info{% endif %}"></i><span>{{ message }}</span></div>
+        {% endfor %}
+    </div>
+    {% endif %}
+{% endwith %}

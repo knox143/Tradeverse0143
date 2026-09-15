@@ -1,0 +1,162 @@
+<!-- Cryptocurrency market table with authentic coin vector logos, Coin Chart Studio, and paper trading. -->
+{% extends 'base.html' %}
+{% block content %}
+<section class="market-page-intro">
+    <div>
+        <p class="eyebrow">Digital assets &bull; USDT</p>
+        <h2>Crypto Market & Chart Studio</h2>
+        <p>Live real-time crypto prices in USDT from Binance API & CoinGecko. Every coin features its official vector symbol and dedicated candlestick chart.</p>
+    </div>
+    <span class="data-label"><i data-lucide="activity"></i>Live Binance & CoinGecko Feed</span>
+</section>
+
+<!-- Coin Chart Studio: Individual Candlestick Chart for Every Coin -->
+<section class="chart-studio-section" id="crypto-chart-studio">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Technical Analysis</p>
+            <h2>Coin Candlestick Studio</h2>
+            <p>Select any cryptocurrency below to inspect its real-time candlestick chart powered by Binance.</p>
+        </div>
+        <div class="chart-legend">
+            <span><i class="legend-win"></i>Bullish Candle</span>
+            <span style="margin-left:8px;"><i class="legend-loss"></i>Bearish Candle</span>
+        </div>
+    </div>
+
+    <div class="chart-asset-selector" id="crypto-chart-pills">
+        <button type="button" class="asset-pill is-active" data-studio-select data-symbol="BTC" data-name="Bitcoin" data-asset-type="crypto" data-currency="USDT" data-price="{% for c in coins %}{% if c.symbol == 'BTC' %}{{ c.price }}{% endif %}{% endfor %}">
+            <span class="pill-icon">{{ 'BTC'|asset_icon('crypto', 24) }}</span>
+            <span><strong>BTC</strong><small>Bitcoin &bull; USDT</small></span>
+        </button>
+        <button type="button" class="asset-pill" data-studio-select data-symbol="ETH" data-name="Ethereum" data-asset-type="crypto" data-currency="USDT" data-price="{% for c in coins %}{% if c.symbol == 'ETH' %}{{ c.price }}{% endif %}{% endfor %}">
+            <span class="pill-icon">{{ 'ETH'|asset_icon('crypto', 24) }}</span>
+            <span><strong>ETH</strong><small>Ethereum &bull; USDT</small></span>
+        </button>
+        <button type="button" class="asset-pill" data-studio-select data-symbol="SOL" data-name="Solana" data-asset-type="crypto" data-currency="USDT" data-price="{% for c in coins %}{% if c.symbol == 'SOL' %}{{ c.price }}{% endif %}{% endfor %}">
+            <span class="pill-icon">{{ 'SOL'|asset_icon('crypto', 24) }}</span>
+            <span><strong>SOL</strong><small>Solana &bull; USDT</small></span>
+        </button>
+        <button type="button" class="asset-pill" data-studio-select data-symbol="BNB" data-name="Binance Coin" data-asset-type="crypto" data-currency="USDT" data-price="{% for c in coins %}{% if c.symbol == 'BNB' %}{{ c.price }}{% endif %}{% endfor %}">
+            <span class="pill-icon">{{ 'BNB'|asset_icon('crypto', 24) }}</span>
+            <span><strong>BNB</strong><small>Binance &bull; USDT</small></span>
+        </button>
+        <button type="button" class="asset-pill" data-studio-select data-symbol="XRP" data-name="Ripple" data-asset-type="crypto" data-currency="USDT" data-price="{% for c in coins %}{% if c.symbol == 'XRP' %}{{ c.price }}{% endif %}{% endfor %}">
+            <span class="pill-icon">{{ 'XRP'|asset_icon('crypto', 24) }}</span>
+            <span><strong>XRP</strong><small>Ripple &bull; USDT</small></span>
+        </button>
+        <button type="button" class="asset-pill" data-studio-select data-symbol="DOGE" data-name="Dogecoin" data-asset-type="crypto" data-currency="USDT" data-price="{% for c in coins %}{% if c.symbol == 'DOGE' %}{{ c.price }}{% endif %}{% endfor %}">
+            <span class="pill-icon">{{ 'DOGE'|asset_icon('crypto', 24) }}</span>
+            <span><strong>DOGE</strong><small>Dogecoin &bull; USDT</small></span>
+        </button>
+        <button type="button" class="asset-pill" data-studio-select data-symbol="ADA" data-name="Cardano" data-asset-type="crypto" data-currency="USDT" data-price="{% for c in coins %}{% if c.symbol == 'ADA' %}{{ c.price }}{% endif %}{% endfor %}">
+            <span class="pill-icon">{{ 'ADA'|asset_icon('crypto', 24) }}</span>
+            <span><strong>ADA</strong><small>Cardano &bull; USDT</small></span>
+        </button>
+        <button type="button" class="asset-pill" data-studio-select data-symbol="MATIC" data-name="Polygon" data-asset-type="crypto" data-currency="USDT" data-price="{% for c in coins %}{% if c.symbol == 'MATIC' %}{{ c.price }}{% endif %}{% endfor %}">
+            <span class="pill-icon">{{ 'MATIC'|asset_icon('crypto', 24) }}</span>
+            <span><strong>MATIC</strong><small>Polygon &bull; USDT</small></span>
+        </button>
+    </div>
+
+    <div class="studio-chart-wrapper">
+        <div class="studio-ticker-bar">
+            <div class="ticker-left">
+                <span id="crypto-studio-icon" class="studio-icon-wrap">{{ 'BTC'|asset_icon('crypto', 36) }}</span>
+                <div>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <h3 id="crypto-studio-title">Bitcoin (BTC)</h3>
+                        <span class="currency-pill usdt">USDT</span>
+                        <span id="crypto-studio-pair" class="pair-tag">BTC/USDT</span>
+                    </div>
+                    <small id="crypto-studio-subtitle">Binance Real-Time OHLCV Daily Candlesticks</small>
+                </div>
+            </div>
+            <div class="ticker-right">
+                <span class="ticker-price" id="crypto-studio-price">-- USDT</span>
+                <button type="button" class="primary-button compact js-trade" id="crypto-studio-trade-btn" data-symbol="BTC" data-name="Bitcoin" data-asset-type="crypto" data-currency="USDT" data-price="77250.00">
+                    <i data-lucide="arrow-up-right"></i>Trade BTC
+                </button>
+            </div>
+        </div>
+        <div id="crypto-studio-canvas" class="chart-canvas studio-canvas" data-chart data-asset-type="crypto" data-symbol="BTC"></div>
+        <div class="chart-foot">
+            <span>Daily OHLCV Candles via Binance Public API</span>
+            <span><i data-lucide="mouse-pointer"></i> Scroll to zoom &bull; Drag to pan</span>
+        </div>
+    </div>
+</section>
+
+<section class="market-controls" aria-label="Crypto search">
+    <form method="get" class="search-form">
+        <label class="sr-only" for="crypto-search">Search crypto</label>
+        <i data-lucide="search"></i>
+        <input id="crypto-search" name="query" type="search" value="{{ query }}" placeholder="Search by coin name or symbol">
+    </form>
+    <p class="control-note">Live tick-by-tick real-time USDT market prices streamed via Binance & CoinGecko.</p>
+</section>
+
+<section class="market-table-section">
+    <div class="section-heading">
+        <div>
+            <h2>Supported crypto assets</h2>
+            <p>{{ coins|length }} crypto assets &bull; Featuring official coin vector logos and market pairs</p>
+        </div>
+    </div>
+    {% if coins %}
+    <div class="table-wrap">
+        <table class="market-table">
+            <thead>
+                <tr>
+                    <th>Asset & Logo</th>
+                    <th>Trading Pair</th>
+                    <th>Rank</th>
+                    <th class="numeric">Live Price</th>
+                    <th class="numeric">24h move</th>
+                    <th aria-label="Chart">Chart</th>
+                    <th aria-label="Watchlist"></th>
+                    <th aria-label="Trade"></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for coin in coins %}
+                <tr>
+                    <td>
+                        <div class="instrument-cell">
+                            <span class="instrument-icon-wrap">{{ coin.symbol|asset_icon('crypto', 32) }}</span>
+                            <span><strong>{{ coin.name }}</strong><small>{{ coin.symbol }}</small></span>
+                        </div>
+                    </td>
+                    <td><span class="pair-tag">{{ coin.symbol }}/USDT</span></td>
+                    <td><span class="market-pill">#{{ coin.rank }}</span></td>
+                    <td class="numeric"><strong>{{ coin.price|usdt }}</strong></td>
+                    <td class="numeric"><b class="{% if coin.change >= 0 %}positive{% else %}negative{% endif %}">{{ coin.change|signed }}%</b></td>
+                    <td>
+                        <button class="table-action js-view-chart" type="button" data-symbol="{{ coin.symbol }}" data-name="{{ coin.name }}" data-asset-type="crypto" data-currency="USDT" data-price="{{ coin.price }}" title="View {{ coin.symbol }} candlestick chart">
+                            <i data-lucide="candlestick-chart"></i> Chart
+                        </button>
+                    </td>
+                    <td>
+                        <button class="icon-button js-watchlist {% if 'crypto:' + coin.symbol in watchlist_keys %}is-saved{% endif %}" type="button" aria-label="Toggle {{ coin.symbol }} in watchlist" data-symbol="{{ coin.symbol }}" data-asset-type="crypto">
+                            <i data-lucide="star"></i>
+                        </button>
+                    </td>
+                    <td>
+                        <button class="table-action js-trade" type="button" data-symbol="{{ coin.symbol }}" data-name="{{ coin.name }}" data-asset-type="crypto" data-currency="USDT" data-price="{{ coin.price }}">
+                            Trade <i data-lucide="arrow-up-right"></i>
+                        </button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <i data-lucide="search-x"></i>
+        <p>No coins match that search.</p>
+        <a href="{{ url_for('crypto') }}">Clear search</a>
+    </div>
+    {% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,259 @@
+<!-- Main paper-trading dashboard with authentic asset vector symbols, multi-asset chart studio, and recent closed trades timeline. -->
+{% extends 'base.html' %}
+{% block content %}
+<section class="dashboard-intro">
+    <div>
+        <h2>Good to see you, {{ current_user['full_name'].split()[0] }}.</h2>
+        <p>Paper trade Indian stocks in INR and Global & Crypto in USDT with authentic brand vector symbols and trade duration tracking.</p>
+    </div>
+    <div style="display: flex; gap: 10px;">
+        <a class="secondary-button" href="{{ url_for('timeline') }}"><i data-lucide="timer"></i>Trade Timeline</a>
+        <a class="primary-button" href="{{ url_for('stocks') }}"><i data-lucide="plus"></i>Explore market</a>
+    </div>
+</section>
+
+<section class="stat-grid" aria-label="Portfolio summary">
+    <article class="metric-card">
+        <div class="metric-heading"><span>Virtual wallet</span><i data-lucide="wallet"></i></div>
+        <div class="metric-dual-values">
+            <div class="metric-dual-row"><small>INR (₹)</small><strong data-wallet-inr>{{ portfolio.inr_wallet|inr }}</strong></div>
+            <div class="metric-dual-row"><small>USDT</small><strong data-wallet-usdt>{{ portfolio.usdt_wallet|usdt }}</strong></div>
+        </div>
+        <p>Available virtual trading cash</p>
+    </article>
+    <article class="metric-card">
+        <div class="metric-heading"><span>Portfolio value</span><i data-lucide="pie-chart"></i></div>
+        <div class="metric-dual-values">
+            <div class="metric-dual-row"><small>INR Holdings</small><strong>{{ portfolio.inr_total_value|inr }}</strong></div>
+            <div class="metric-dual-row"><small>USDT Holdings</small><strong>{{ portfolio.usdt_total_value|usdt }}</strong></div>
+        </div>
+        <p>{{ portfolio.holdings|length }} active holding{% if portfolio.holdings|length != 1 %}s{% endif %}</p>
+    </article>
+    <article class="metric-card">
+        <div class="metric-heading"><span>Unrealized P/L</span><i data-lucide="trending-up"></i></div>
+        <div class="metric-dual-values">
+            <div class="metric-dual-row"><small>INR P/L</small><strong class="{% if portfolio.inr_profit_loss >= 0 %}positive{% else %}negative{% endif %}">{{ portfolio.inr_profit_loss|signed_currency('INR') }}</strong></div>
+            <div class="metric-dual-row"><small>USDT P/L</small><strong class="{% if portfolio.usdt_profit_loss >= 0 %}positive{% else %}negative{% endif %}">{{ portfolio.usdt_profit_loss|signed_currency('USDT') }}</strong></div>
+        </div>
+        <p class="{% if portfolio.inr_profit_loss >= 0 %}positive{% else %}negative{% endif %}">{{ portfolio.inr_profit_loss_percent|signed }}% INR / {{ portfolio.usdt_profit_loss_percent|signed }}% USDT</p>
+    </article>
+</section>
+
+<section class="workspace-grid">
+    <!-- Multi-Asset Interactive Chart Studio in Dashboard -->
+    <article class="chart-section" id="dashboard-chart-section">
+        <div class="section-heading">
+            <div>
+                <p class="eyebrow">Market Visualizer</p>
+                <h2 id="dash-chart-title">Portfolio & Coin Charts</h2>
+            </div>
+            <div class="chart-legend" id="dash-chart-legend">
+                <span><i></i>Reference trend</span>
+            </div>
+        </div>
+
+        <!-- Tab switcher for charts -->
+        <div class="dashboard-chart-tabs" id="dash-chart-tabs">
+            <button type="button" class="dash-chart-tab is-active" data-chart-mode="portfolio" data-value="{{ portfolio.total_value }}">
+                <i data-lucide="line-chart"></i> Portfolio Curve
+            </button>
+            <button type="button" class="dash-chart-tab" data-chart-mode="candle" data-asset-type="crypto" data-symbol="BTC" data-label="Bitcoin (BTC) Candlestick Chart">
+                {{ 'BTC'|asset_icon('crypto', 16) }} BTC
+            </button>
+            <button type="button" class="dash-chart-tab" data-chart-mode="candle" data-asset-type="crypto" data-symbol="ETH" data-label="Ethereum (ETH) Candlestick Chart">
+                {{ 'ETH'|asset_icon('crypto', 16) }} ETH
+            </button>
+            <button type="button" class="dash-chart-tab" data-chart-mode="candle" data-asset-type="crypto" data-symbol="SOL" data-label="Solana (SOL) Candlestick Chart">
+                {{ 'SOL'|asset_icon('crypto', 16) }} SOL
+            </button>
+            <button type="button" class="dash-chart-tab" data-chart-mode="candle" data-asset-type="stock" data-symbol="RELIANCE.NS" data-label="Reliance Industries (NSE INR) Candlestick Chart">
+                {{ 'RELIANCE.NS'|asset_icon('stock', 16) }} Reliance
+            </button>
+            <button type="button" class="dash-chart-tab" data-chart-mode="candle" data-asset-type="stock" data-symbol="AAPL" data-label="Apple Inc. (USDT) Candlestick Chart">
+                {{ 'AAPL'|asset_icon('stock', 16) }} Apple
+            </button>
+        </div>
+
+        <div id="dash-chart-canvas" class="chart-canvas portfolio-chart" data-portfolio-chart data-value="{{ portfolio.total_value }}" aria-label="Practice account value chart"></div>
+        <div class="chart-foot">
+            <span id="dash-chart-foot-left">Virtual portfolio value &bull; Switch tabs to view individual coin/stock candles</span>
+            <span id="dash-chart-foot-right">Updated live</span>
+        </div>
+    </article>
+
+    <article class="quick-trade-panel">
+        <div class="section-heading"><div><p class="eyebrow">Quick action</p><h2>Place a paper trade</h2></div><i data-lucide="arrow-left-right"></i></div>
+        <p>Popular instruments with official symbols ready to trade.</p>
+        <div class="quick-trade-list">
+            {% if quick_starters %}
+            {% for item in quick_starters %}
+            <button type="button" class="quick-instrument js-trade" data-symbol="{{ item.symbol }}" data-name="{{ item.name }}" data-asset-type="{{ item.asset_type }}" data-currency="{{ item.currency }}" data-price="{{ item.price }}">
+                <span class="instrument-icon-wrap">{{ item.symbol|asset_icon(item.asset_type, 30) }}</span>
+                <span><strong>{{ item.name }}</strong><small><span class="pair-tag">{{ item.symbol|market_pair(item.currency) }}</span></small></span>
+                <em>{{ item.price|currency_val(item.currency) }}</em>
+                <i data-lucide="arrow-up-right"></i>
+            </button>
+            {% endfor %}
+            {% else %}
+            <button type="button" class="quick-instrument js-trade" data-symbol="RELIANCE.NS" data-name="Reliance Industries" data-asset-type="stock" data-currency="INR" data-price="1257.50">
+                <span class="instrument-icon-wrap">{{ 'RELIANCE.NS'|asset_icon('stock', 30) }}</span>
+                <span><strong>Reliance Industries</strong><small><span class="pair-tag">RELIANCE/INR</span></small></span>
+                <em>₹1,257.50</em>
+                <i data-lucide="arrow-up-right"></i>
+            </button>
+            <button type="button" class="quick-instrument js-trade" data-symbol="BTC" data-name="Bitcoin" data-asset-type="crypto" data-currency="USDT" data-price="77250.00">
+                <span class="instrument-icon-wrap">{{ 'BTC'|asset_icon('crypto', 30) }}</span>
+                <span><strong>Bitcoin</strong><small><span class="pair-tag">BTC/USDT</span></small></span>
+                <em>77,250.00 USDT</em>
+                <i data-lucide="arrow-up-right"></i>
+            </button>
+            <button type="button" class="quick-instrument js-trade" data-symbol="AAPL" data-name="Apple" data-asset-type="stock" data-currency="USDT" data-price="217.96">
+                <span class="instrument-icon-wrap">{{ 'AAPL'|asset_icon('stock', 30) }}</span>
+                <span><strong>Apple</strong><small><span class="pair-tag">AAPL/USDT</span></small></span>
+                <em>217.96 USDT</em>
+                <i data-lucide="arrow-up-right"></i>
+            </button>
+            {% endif %}
+        </div>
+        <div style="display:flex; justify-content:space-between; margin-top:15px;">
+            <a class="text-link" href="{{ url_for('crypto') }}">Browse crypto <i data-lucide="arrow-right"></i></a>
+            <a class="text-link" href="{{ url_for('stocks') }}">Browse stocks <i data-lucide="arrow-right"></i></a>
+        </div>
+    </article>
+</section>
+
+<!-- Recent Closed Trades Timeline Preview Section -->
+<section class="table-section recent-timeline-section" style="margin-bottom: 20px;">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Trade Close Timeline</p>
+            <h2>Recent Closed Positions & Duration</h2>
+            <p>See how fast your recent trades closed and realized profit/loss in INR and USDT.</p>
+        </div>
+        <a class="text-link" href="{{ url_for('timeline') }}">View full timeline <i data-lucide="arrow-right"></i></a>
+    </div>
+
+    {% if recent_closed %}
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Instrument</th>
+                    <th>Time to Close (Duration)</th>
+                    <th class="numeric">Buy Entry</th>
+                    <th class="numeric">Sell Exit</th>
+                    <th class="numeric">Volume</th>
+                    <th class="numeric">Realized P/L</th>
+                    <th>Closed At</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for trade in recent_closed %}
+                <tr>
+                    <td>
+                        <div class="instrument-cell">
+                            <span class="instrument-icon-wrap">{{ trade.symbol|asset_icon(trade.asset_type, 30) }}</span>
+                            <span><strong>{{ trade.symbol }}</strong><small><span class="pair-tag">{{ trade.symbol|market_pair(trade.currency) }}</span></small></span>
+                        </div>
+                    </td>
+                    <td>
+                        <span class="duration-badge"><i data-lucide="timer"></i> Closed in {{ trade.duration_formatted }}</span>
+                    </td>
+                    <td class="numeric">{{ trade.buy_price|currency_val(trade.currency) }}</td>
+                    <td class="numeric"><strong>{{ trade.sell_price|currency_val(trade.currency) }}</strong></td>
+                    <td class="numeric">{{ trade.quantity|quantity }}</td>
+                    <td class="numeric">
+                        <strong class="{% if trade.realized_pnl >= 0 %}positive{% else %}negative{% endif %}">{{ trade.realized_pnl|signed_currency(trade.currency) }}</strong>
+                        <small class="{% if trade.realized_pnl >= 0 %}positive{% else %}negative{% endif %}">{{ trade.realized_pnl_percent|signed }}%</small>
+                    </td>
+                    <td>{{ trade.closed_at }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state horizontal">
+        <i data-lucide="timer"></i>
+        <p>No closed trades yet. When you sell a position, its holding time duration and profit/loss timeline will show here.</p>
+    </div>
+    {% endif %}
+</section>
+
+<section class="three-column-grid">
+    <article class="market-list-section">
+        <div class="section-heading compact"><div><p class="eyebrow">Market movers</p><h2>Top gainers</h2></div><i data-lucide="trending-up"></i></div>
+        {% for quote in gainers %}
+        <button type="button" class="market-row js-trade" data-symbol="{{ quote.symbol }}" data-name="{{ quote.name }}" data-asset-type="{{ quote.asset_type }}" data-currency="{{ quote.currency }}" data-price="{{ quote.price }}">
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <span class="row-icon-wrap">{{ quote.symbol|asset_icon(quote.asset_type, 24) }}</span>
+                <span><strong>{{ quote.symbol }}</strong><small>{{ quote.name }}</small></span>
+            </div>
+            <span><em>{{ quote.price|currency_val(quote.currency) }}</em><b class="positive">{{ quote.change|signed }}%</b></span>
+        </button>
+        {% endfor %}
+    </article>
+
+    <article class="market-list-section">
+        <div class="section-heading compact"><div><p class="eyebrow">Market movers</p><h2>Top losers</h2></div><i data-lucide="trending-down"></i></div>
+        {% for quote in losers %}
+        <button type="button" class="market-row js-trade" data-symbol="{{ quote.symbol }}" data-name="{{ quote.name }}" data-asset-type="{{ quote.asset_type }}" data-currency="{{ quote.currency }}" data-price="{{ quote.price }}">
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <span class="row-icon-wrap">{{ quote.symbol|asset_icon(quote.asset_type, 24) }}</span>
+                <span><strong>{{ quote.symbol }}</strong><small>{{ quote.name }}</small></span>
+            </div>
+            <span><em>{{ quote.price|currency_val(quote.currency) }}</em><b class="negative">{{ quote.change|signed }}%</b></span>
+        </button>
+        {% endfor %}
+    </article>
+
+    <article class="market-list-section">
+        <div class="section-heading compact"><div><p class="eyebrow">Your list</p><h2>Watchlist</h2></div><a class="icon-button" href="{{ url_for('stocks') }}" aria-label="Add market symbols"><i data-lucide="plus"></i></a></div>
+        {% if watchlist %}
+        {% for quote in watchlist %}
+        <button type="button" class="market-row js-trade" data-symbol="{{ quote.symbol }}" data-name="{{ quote.name }}" data-asset-type="{{ quote.asset_type }}" data-currency="{{ quote.currency }}" data-price="{{ quote.price }}">
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <span class="row-icon-wrap">{{ quote.symbol|asset_icon(quote.asset_type, 24) }}</span>
+                <span><strong>{{ quote.symbol }}</strong><small>{{ quote.name }}</small></span>
+            </div>
+            <span><em>{{ quote.price|currency_val(quote.currency) }}</em><b class="{% if quote.change >= 0 %}positive{% else %}negative{% endif %}">{{ quote.change|signed }}%</b></span>
+        </button>
+        {% endfor %}
+        {% else %}
+        <div class="empty-state"><i data-lucide="star"></i><p>Save market symbols to keep them close.</p><a href="{{ url_for('stocks') }}">Find a stock</a></div>
+        {% endif %}
+    </article>
+</section>
+
+<section class="table-section recent-section">
+    <div class="section-heading">
+        <div><p class="eyebrow">Your activity</p><h2>Recent transactions</h2></div>
+        <a class="text-link" href="{{ url_for('portfolio') }}">View portfolio <i data-lucide="arrow-right"></i></a>
+    </div>
+    {% if transactions %}
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>Instrument</th><th>Type</th><th>Quantity</th><th>Reference price</th><th>Time</th></tr></thead>
+            <tbody>
+                {% for transaction in transactions %}
+                <tr>
+                    <td>
+                        <div class="instrument-cell">
+                            <span class="instrument-icon-wrap">{{ transaction.symbol|asset_icon('stock', 24) }}</span>
+                            <span><strong>{{ transaction.symbol }}</strong><small>{{ transaction.asset_name }}</small></span>
+                        </div>
+                    </td>
+                    <td><span class="trade-tag {{ transaction.trade_type|lower }}">{{ transaction.trade_type }}</span></td>
+                    <td>{{ transaction.quantity|quantity }}</td>
+                    <td>{{ transaction.price|currency_val(transaction.currency) }}</td>
+                    <td>{{ transaction.created_at }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state horizontal"><i data-lucide="receipt-text"></i><p>Your completed practice trades will appear here.</p></div>
+    {% endif %}
+</section>
+{% endblock %}

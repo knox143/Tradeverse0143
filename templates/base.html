@@ -1,0 +1,114 @@
+<!-- Shared Jinja layout: navigation, flash messages, and the reusable paper-trade dialog. -->
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="TradeVerse virtual investing practice and financial learning.">
+    <title>{% block title %}{{ page_name }} | TradeVerse{% endblock %}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body class="{% if not current_user %}auth-body{% endif %}">
+    {% if current_user %}
+    <div class="app-shell" id="app-shell">
+        <aside class="sidebar" aria-label="Main navigation">
+            <a class="brand" href="{{ url_for('dashboard') }}" aria-label="TradeVerse dashboard">
+                <span class="brand-mark" aria-hidden="true"><i data-lucide="candlestick-chart"></i></span>
+                <span>Trade<span>Verse</span></span>
+            </a>
+            <p class="sidebar-label">Workspace</p>
+            <nav class="main-nav">
+                <a class="nav-link {% if request.endpoint == 'dashboard' %}is-active{% endif %}" href="{{ url_for('dashboard') }}"><i data-lucide="layout-dashboard"></i>Dashboard</a>
+                <a class="nav-link {% if request.endpoint == 'stocks' %}is-active{% endif %}" href="{{ url_for('stocks') }}"><i data-lucide="landmark"></i>Stocks</a>
+                <a class="nav-link {% if request.endpoint == 'crypto' %}is-active{% endif %}" href="{{ url_for('crypto') }}"><i data-lucide="bitcoin"></i>Crypto</a>
+                <a class="nav-link {% if request.endpoint == 'portfolio' %}is-active{% endif %}" href="{{ url_for('portfolio') }}"><i data-lucide="briefcase-business"></i>Portfolio</a>
+                <a class="nav-link {% if request.endpoint == 'timeline' %}is-active{% endif %}" href="{{ url_for('timeline') }}"><i data-lucide="clock"></i>Trade Timeline</a>
+                <a class="nav-link {% if request.endpoint == 'watchlist' %}is-active{% endif %}" href="{{ url_for('watchlist') }}"><i data-lucide="star"></i>Watchlist</a>
+                <a class="nav-link {% if request.endpoint == 'leaderboard' %}is-active{% endif %}" href="{{ url_for('leaderboard') }}"><i data-lucide="trophy"></i>Leaderboard</a>
+            </nav>
+            <p class="sidebar-label">Learn</p>
+            <nav class="main-nav">
+                <a class="nav-link {% if request.endpoint == 'learning' %}is-active{% endif %}" href="{{ url_for('learning') }}"><i data-lucide="book-open"></i>Learning</a>
+                <a class="nav-link {% if request.endpoint == 'quiz' %}is-active{% endif %}" href="{{ url_for('quiz') }}"><i data-lucide="circle-help"></i>Weekly quiz</a>
+            </nav>
+            <div class="sidebar-footer">
+                <a class="user-summary {% if request.endpoint == 'profile' %}is-active{% endif %}" href="{{ url_for('profile') }}">
+                    <span class="avatar">{{ current_user['full_name'][0]|upper }}</span>
+                    <span><strong>{{ current_user['full_name'] }}</strong><small>Paper trader</small></span>
+                    <i data-lucide="chevron-right"></i>
+                </a>
+                <a class="logout-link" href="{{ url_for('logout') }}"><i data-lucide="log-out"></i>Log out</a>
+            </div>
+        </aside>
+        <div class="content-area">
+            <header class="topbar">
+                <button class="icon-button mobile-menu-button" type="button" aria-label="Toggle navigation" data-menu-toggle><i data-lucide="menu"></i></button>
+                <div>
+                    <p class="eyebrow">Paper trading workspace</p>
+                    <h1>{{ page_name }}</h1>
+                </div>
+                <div class="market-status"><span class="status-dot"></span>Practice market open</div>
+            </header>
+            <main class="page-content">
+                {% include '_flash_messages.html' %}
+    {% else %}
+    <main class="auth-layout">
+        {% include '_flash_messages.html' %}
+    {% endif %}
+    {% block content %}{% endblock %}
+    {% if current_user %}
+            </main>
+        </div>
+    </div>
+    {% else %}
+    </main>
+    {% endif %}
+
+    {% if current_user %}
+    <dialog class="trade-dialog" id="trade-dialog" aria-labelledby="trade-dialog-title">
+        <form method="dialog" class="dialog-close-row"><button class="icon-button" type="submit" aria-label="Close order form"><i data-lucide="x"></i></button></form>
+        <div class="dialog-heading">
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                <p class="eyebrow">Virtual order</p>
+                <span id="trade-currency-tag" class="currency-pill inr">INR</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 12px; margin-top: 6px;">
+                <span id="trade-modal-icon" class="modal-icon-wrap">{{ 'BTC'|asset_icon('crypto', 38) }}</span>
+                <div>
+                    <h2 id="trade-dialog-title" style="margin:0;">Place paper trade</h2>
+                    <p id="trade-instrument" style="margin:2px 0 0;">Select a market instrument.</p>
+                </div>
+            </div>
+        </div>
+        <div class="trade-modal-chart-wrap" id="trade-modal-chart-wrap">
+            <div class="trade-modal-chart-canvas" id="trade-modal-chart" style="height: 160px; width: 100%;"></div>
+        </div>
+        <form id="trade-form" class="trade-form">
+            <input type="hidden" name="symbol" id="trade-symbol">
+            <input type="hidden" name="asset_type" id="trade-asset-type">
+            <div class="dialog-wallet-note">
+                <span>Available in wallet:</span>
+                <strong id="trade-wallet-available">--</strong>
+            </div>
+            <div class="segmented-control" role="group" aria-label="Order side">
+                <button class="segment is-selected" type="button" data-trade-side="BUY" aria-pressed="true">Buy</button>
+                <button class="segment" type="button" data-trade-side="SELL" aria-pressed="false">Sell</button>
+                <input type="hidden" name="side" id="trade-side" value="BUY">
+            </div>
+            <label class="field-label" for="trade-quantity">Quantity</label>
+            <input class="field-input" id="trade-quantity" name="quantity" type="number" min="0.0001" step="0.0001" value="1" required>
+            <div class="order-estimate"><span>Reference price</span><strong id="trade-price">--</strong><span>Estimated value</span><strong id="trade-total">--</strong></div>
+            <button class="primary-button order-submit" type="submit"><i data-lucide="arrow-left-right"></i>Place virtual order</button>
+            <p class="form-note">Orders use virtual practice credits (INR for Indian stocks, USDT for Global & Crypto) and never place a real market order.</p>
+        </form>
+    </dialog>
+    {% endif %}
+    <div class="toast-region" id="toast-region" aria-live="polite"></div>
+    <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
+    <script src="https://unpkg.com/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"></script>
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>

@@ -1,0 +1,199 @@
+<!-- Portfolio page for holdings with official asset logos, holding duration, P/L, and timeline. -->
+{% extends 'base.html' %}
+{% block content %}
+<section class="portfolio-header">
+    <div>
+        <p class="eyebrow">Paper account &bull; Dual Currency</p>
+        <h2>Your portfolio, in one place.</h2>
+        <p>Current values estimated from real-time live quotes in INR ₹ & USDT with official company and crypto logos.</p>
+    </div>
+    <div style="display: flex; gap: 10px;">
+        <a class="secondary-button" href="{{ url_for('timeline') }}"><i data-lucide="timer"></i>Trade Timeline</a>
+        <a class="primary-button" href="{{ url_for('stocks') }}"><i data-lucide="plus"></i>New trade</a>
+    </div>
+</section>
+
+<section class="stat-grid portfolio-stats" aria-label="Portfolio totals">
+    <article class="metric-card">
+        <div class="metric-heading"><span>Current value</span><i data-lucide="chart-line"></i></div>
+        <div class="metric-dual-values">
+            <div class="metric-dual-row"><small>INR Value</small><strong>{{ portfolio.inr_total_value|inr }}</strong></div>
+            <div class="metric-dual-row"><small>USDT Value</small><strong>{{ portfolio.usdt_total_value|usdt }}</strong></div>
+        </div>
+        <p>Across {{ portfolio.holdings|length }} holding{% if portfolio.holdings|length != 1 %}s{% endif %}</p>
+    </article>
+    <article class="metric-card">
+        <div class="metric-heading"><span>Investment value</span><i data-lucide="circle-dollar-sign"></i></div>
+        <div class="metric-dual-values">
+            <div class="metric-dual-row"><small>INR Cost</small><strong>{{ portfolio.inr_total_cost|inr }}</strong></div>
+            <div class="metric-dual-row"><small>USDT Cost</small><strong>{{ portfolio.usdt_total_cost|usdt }}</strong></div>
+        </div>
+        <p>Original cost basis</p>
+    </article>
+    <article class="metric-card">
+        <div class="metric-heading"><span>Profit / loss</span><i data-lucide="scale"></i></div>
+        <div class="metric-dual-values">
+            <div class="metric-dual-row"><small>INR P/L</small><strong class="{% if portfolio.inr_profit_loss >= 0 %}positive{% else %}negative{% endif %}">{{ portfolio.inr_profit_loss|signed_currency('INR') }}</strong></div>
+            <div class="metric-dual-row"><small>USDT P/L</small><strong class="{% if portfolio.usdt_profit_loss >= 0 %}positive{% else %}negative{% endif %}">{{ portfolio.usdt_profit_loss|signed_currency('USDT') }}</strong></div>
+        </div>
+        <p class="{% if portfolio.inr_profit_loss >= 0 %}positive{% else %}negative{% endif %}">{{ portfolio.inr_profit_loss_percent|signed }}% INR / {{ portfolio.usdt_profit_loss_percent|signed }}% USDT</p>
+    </article>
+</section>
+
+<section class="table-section">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Active positions</p>
+            <h2>Current holdings & holding duration</h2>
+        </div>
+        <span class="data-label"><i data-lucide="wallet"></i><span data-wallet-inr>{{ portfolio.inr_wallet|inr }}</span> &bull; <span data-wallet-usdt>{{ portfolio.usdt_wallet|usdt }}</span> available</span>
+    </div>
+    {% if portfolio.holdings %}
+    <div class="table-wrap">
+        <table class="holdings-table">
+            <thead>
+                <tr>
+                    <th>Instrument</th>
+                    <th>Trading Pair</th>
+                    <th>Units</th>
+                    <th>Time Open (Age)</th>
+                    <th class="numeric">Average price</th>
+                    <th class="numeric">Current price</th>
+                    <th class="numeric">Investment</th>
+                    <th class="numeric">Current value</th>
+                    <th class="numeric">P/L</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for holding in portfolio.holdings %}
+                <tr>
+                    <td>
+                        <div class="instrument-cell">
+                            <span class="instrument-icon-wrap">{{ holding.symbol|asset_icon(holding.asset_type, 32) }}</span>
+                            <span><strong>{{ holding.symbol }}</strong><small>{{ holding.asset_name }}</small></span>
+                        </div>
+                    </td>
+                    <td><span class="pair-tag">{{ holding.symbol|market_pair(holding.currency) }}</span></td>
+                    <td>{{ holding.quantity|quantity }}</td>
+                    <td>
+                        <span class="duration-badge active"><i data-lucide="clock"></i> {{ holding.position_age_formatted }}</span>
+                    </td>
+                    <td class="numeric">{{ holding.average_price|currency_val(holding.currency) }}</td>
+                    <td class="numeric"><strong>{{ holding.current_price|currency_val(holding.currency) }}</strong></td>
+                    <td class="numeric">{{ holding.cost_basis|currency_val(holding.currency) }}</td>
+                    <td class="numeric"><strong>{{ holding.current_value|currency_val(holding.currency) }}</strong></td>
+                    <td class="numeric">
+                        <b class="{% if holding.profit_loss >= 0 %}positive{% else %}negative{% endif %}">{{ holding.profit_loss|signed_currency(holding.currency) }}</b>
+                        <small class="{% if holding.profit_loss >= 0 %}positive{% else %}negative{% endif %}">{{ holding.profit_loss_percent|signed }}%</small>
+                    </td>
+                    <td>
+                        <button type="button" class="table-action js-trade" data-symbol="{{ holding.symbol }}" data-name="{{ holding.asset_name }}" data-asset-type="{{ holding.asset_type }}" data-currency="{{ holding.currency }}" data-price="{{ holding.current_price }}" data-order-side="SELL">
+                            Sell / Close <i data-lucide="arrow-up-right"></i>
+                        </button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state portfolio-empty">
+        <i data-lucide="briefcase-business"></i>
+        <h3>Your portfolio is ready for a first practice trade.</h3>
+        <p>Start with a small virtual position in INR or USDT and review what changes.</p>
+        <div style="display: flex; gap: 10px; margin-top: 10px;">
+            <a class="primary-button" href="{{ url_for('crypto') }}"><i data-lucide="coins"></i>Trade Crypto</a>
+            <a class="secondary-button" href="{{ url_for('stocks') }}"><i data-lucide="landmark"></i>Trade Stocks</a>
+        </div>
+    </div>
+    {% endif %}
+</section>
+
+<!-- Closed Trades Timeline Section -->
+<section class="table-section" style="margin-top: 24px;">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Closed Trades Timeline</p>
+            <h2>Trade Lifecycle & Duration History</h2>
+            <p>How long each completed trade took from open (BUY) to close (SELL) with net realized gains.</p>
+        </div>
+        <a class="text-link" href="{{ url_for('timeline') }}">Full Timeline Page <i data-lucide="arrow-right"></i></a>
+    </div>
+    {% if closed_trades %}
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Instrument</th>
+                    <th>Time to Close (Duration)</th>
+                    <th class="numeric">Buy Price</th>
+                    <th class="numeric">Sell Price</th>
+                    <th class="numeric">Units</th>
+                    <th class="numeric">Realized P/L</th>
+                    <th>Closed Timestamp</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for trade in closed_trades %}
+                <tr>
+                    <td>
+                        <div class="instrument-cell">
+                            <span class="instrument-icon-wrap">{{ trade.symbol|asset_icon(trade.asset_type, 30) }}</span>
+                            <span><strong>{{ trade.symbol }}</strong><small><span class="pair-tag">{{ trade.symbol|market_pair(trade.currency) }}</span></small></span>
+                        </div>
+                    </td>
+                    <td>
+                        <span class="duration-badge"><i data-lucide="timer"></i> Closed in {{ trade.duration_formatted }}</span>
+                    </td>
+                    <td class="numeric">{{ trade.buy_price|currency_val(trade.currency) }}</td>
+                    <td class="numeric"><strong>{{ trade.sell_price|currency_val(trade.currency) }}</strong></td>
+                    <td class="numeric">{{ trade.quantity|quantity }}</td>
+                    <td class="numeric">
+                        <strong class="{% if trade.realized_pnl >= 0 %}positive{% else %}negative{% endif %}">{{ trade.realized_pnl|signed_currency(trade.currency) }}</strong>
+                        <small class="{% if trade.realized_pnl >= 0 %}positive{% else %}negative{% endif %}">{{ trade.realized_pnl_percent|signed }}%</small>
+                    </td>
+                    <td>{{ trade.closed_at }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state horizontal">
+        <i data-lucide="timer-off"></i>
+        <p>No trades have been closed yet. When you sell an active holding, its duration and timeline will appear here.</p>
+    </div>
+    {% endif %}
+</section>
+
+<section class="table-section" style="margin-top: 24px;">
+    <div class="section-heading"><div><p class="eyebrow">Paper ledger</p><h2>Transaction history</h2></div></div>
+    {% if transactions %}
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>Instrument</th><th>Order</th><th>Quantity</th><th class="numeric">Price</th><th class="numeric">Amount</th><th>Completed</th></tr></thead>
+            <tbody>
+                {% for transaction in transactions %}
+                <tr>
+                    <td>
+                        <div class="instrument-cell">
+                            <span class="instrument-icon-wrap">{{ transaction.symbol|asset_icon('stock', 24) }}</span>
+                            <span><strong>{{ transaction.symbol }}</strong><small>{{ transaction.asset_name }}</small></span>
+                        </div>
+                    </td>
+                    <td><span class="trade-tag {{ transaction.trade_type|lower }}">{{ transaction.trade_type }}</span></td>
+                    <td>{{ transaction.quantity|quantity }}</td>
+                    <td class="numeric">{{ transaction.price|currency_val(transaction.currency) }}</td>
+                    <td class="numeric"><strong>{{ transaction.total_amount|currency_val(transaction.currency) }}</strong></td>
+                    <td>{{ transaction.created_at }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state horizontal"><i data-lucide="receipt-text"></i><p>Complete a virtual buy or sell order to create your ledger.</p></div>
+    {% endif %}
+</section>
+{% endblock %}

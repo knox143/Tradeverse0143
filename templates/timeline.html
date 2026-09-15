@@ -1,0 +1,170 @@
+<!-- Trade Lifecycle & Closed Trades Timeline page with authentic logos -->
+{% extends 'base.html' %}
+{% block content %}
+<section class="market-page-intro">
+    <div>
+        <p class="eyebrow">Trade Lifecycle & Duration</p>
+        <h2>Closed Trades Timeline</h2>
+        <p>Analyze how long each trade stayed open, entry & exit execution timestamps, and your net realized profit or loss in INR and USDT with full asset symbols.</p>
+    </div>
+    <span class="data-label"><i data-lucide="timer"></i>Live Duration Tracking</span>
+</section>
+
+<section class="stat-grid" aria-label="Timeline performance statistics">
+    <article class="metric-card">
+        <div class="metric-heading"><span>Closed positions</span><i data-lucide="check-circle-2"></i></div>
+        <div class="metric-dual-values">
+            <div class="metric-dual-row"><small>Total Trades</small><strong>{{ timeline_stats.total_closed }}</strong></div>
+            <div class="metric-dual-row"><small>Win Rate</small><strong class="{% if timeline_stats.win_rate >= 50 %}positive{% else %}negative{% endif %}">{{ timeline_stats.win_rate }}%</strong></div>
+        </div>
+        <p><span class="positive">{{ timeline_stats.win_trades }} Win{% if timeline_stats.win_trades != 1 %}s{% endif %}</span> &bull; <span class="negative">{{ timeline_stats.loss_trades }} Loss{% if timeline_stats.loss_trades != 1 %}es{% endif %}</span></p>
+    </article>
+
+    <article class="metric-card">
+        <div class="metric-heading"><span>Holding time</span><i data-lucide="clock"></i></div>
+        <div class="metric-dual-values">
+            <div class="metric-dual-row"><small>Avg. Hold Duration</small><strong>{{ timeline_stats.avg_duration_formatted }}</strong></div>
+            <div class="metric-dual-row"><small>Fastest Close</small><strong>{% if timeline_stats.fastest_trade %}{{ timeline_stats.fastest_trade.duration_formatted }} <small style="display:inline; font-size:10px;">({{ timeline_stats.fastest_trade.symbol }})</small>{% else %}--{% endif %}</strong></div>
+        </div>
+        <p>{% if timeline_stats.longest_trade %}Longest trade: <strong>{{ timeline_stats.longest_trade.duration_formatted }}</strong> ({{ timeline_stats.longest_trade.symbol }}){% else %}Completed trades establish timing benchmarks{% endif %}</p>
+    </article>
+
+    <article class="metric-card">
+        <div class="metric-heading"><span>Realized profit / loss</span><i data-lucide="scale"></i></div>
+        <div class="metric-dual-values">
+            <div class="metric-dual-row"><small>INR Net Realized</small><strong class="{% if timeline_stats.total_inr_pnl >= 0 %}positive{% else %}negative{% endif %}">{{ timeline_stats.total_inr_pnl|signed_currency('INR') }}</strong></div>
+            <div class="metric-dual-row"><small>USDT Net Realized</small><strong class="{% if timeline_stats.total_usdt_pnl >= 0 %}positive{% else %}negative{% endif %}">{{ timeline_stats.total_usdt_pnl|signed_currency('USDT') }}</strong></div>
+        </div>
+        <p>Locked-in gains from closed positions</p>
+    </article>
+</section>
+
+{% if active_holdings %}
+<section class="table-section active-positions-section" style="margin-bottom: 24px;">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Currently Open</p>
+            <h2>Active Positions & Open Duration</h2>
+            <p>Track how long your current open holdings have been active since first entry.</p>
+        </div>
+        <span class="data-label"><i data-lucide="hourglass"></i>{{ active_holdings|length }} Open</span>
+    </div>
+    <div class="table-wrap">
+        <table class="holdings-table">
+            <thead>
+                <tr>
+                    <th>Instrument</th>
+                    <th>Trading Pair</th>
+                    <th>Units</th>
+                    <th>Time Open (Holding)</th>
+                    <th class="numeric">Buy Avg</th>
+                    <th class="numeric">Current Live</th>
+                    <th class="numeric">Unrealized P/L</th>
+                    <th class="numeric">Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for holding in active_holdings %}
+                <tr>
+                    <td>
+                        <div class="instrument-cell">
+                            <span class="instrument-icon-wrap">{{ holding.symbol|asset_icon(holding.asset_type, 32) }}</span>
+                            <span><strong>{{ holding.symbol }}</strong><small>{{ holding.asset_name }}</small></span>
+                        </div>
+                    </td>
+                    <td><span class="pair-tag">{{ holding.symbol|market_pair(holding.currency) }}</span></td>
+                    <td>{{ holding.quantity|quantity }}</td>
+                    <td><span class="duration-badge active"><i data-lucide="clock"></i> Open for {{ holding.position_age_formatted }}</span></td>
+                    <td class="numeric">{{ holding.average_price|currency_val(holding.currency) }}</td>
+                    <td class="numeric"><strong>{{ holding.current_price|currency_val(holding.currency) }}</strong></td>
+                    <td class="numeric"><b class="{% if holding.profit_loss >= 0 %}positive{% else %}negative{% endif %}">{{ holding.profit_loss|signed_currency(holding.currency) }}</b><small class="{% if holding.profit_loss >= 0 %}positive{% else %}negative{% endif %}">{{ holding.profit_loss_percent|signed }}%</small></td>
+                    <td class="numeric"><button type="button" class="table-action sell-action js-trade" data-symbol="{{ holding.symbol }}" data-name="{{ holding.asset_name }}" data-asset-type="{{ holding.asset_type }}" data-currency="{{ holding.currency }}" data-price="{{ holding.current_price }}" data-order-side="SELL"><i data-lucide="check-circle"></i> Close (Sell)</button></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endif %}
+
+<section class="timeline-section">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Trade Lifecycle Log</p>
+            <h2>Chronological Closed Trades Timeline</h2>
+            <p>Detailed breakdown showing how much time each position took to close, exact buy & sell points, and realized gains.</p>
+        </div>
+        <div class="chart-legend"><span><i class="legend-win"></i>Profit</span> <span style="margin-left:8px;"><i class="legend-loss"></i>Loss</span></div>
+    </div>
+
+    {% if closed_trades %}
+    <div class="timeline-list">
+        {% for trade in closed_trades %}
+        <article class="timeline-card {% if trade.realized_pnl >= 0 %}win-card{% else %}loss-card{% endif %}">
+            <div class="timeline-card-header">
+                <div class="instrument-cell">
+                    <span class="instrument-icon-wrap">{{ trade.symbol|asset_icon(trade.asset_type, 34) }}</span>
+                    <div>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <strong>{{ trade.symbol }}</strong>
+                            <span class="currency-pill {{ trade.currency|lower }}">{{ trade.currency }}</span>
+                            <span class="pair-tag">{{ trade.symbol|market_pair(trade.currency) }}</span>
+                        </div>
+                        <small>{{ trade.asset_name }}</small>
+                    </div>
+                </div>
+                <div class="timeline-duration-wrap">
+                    <span class="duration-badge"><i data-lucide="timer"></i> Closed in <strong>{{ trade.duration_formatted }}</strong></span>
+                </div>
+                <div class="timeline-pnl-cell">
+                    <strong class="{% if trade.realized_pnl >= 0 %}positive{% else %}negative{% endif %}">{{ trade.realized_pnl|signed_currency(trade.currency) }}</strong>
+                    <small class="{% if trade.realized_pnl >= 0 %}positive{% else %}negative{% endif %}">{{ trade.realized_pnl_percent|signed }}% P/L</small>
+                </div>
+            </div>
+
+            <div class="timeline-lifecycle-bar">
+                <div class="lifecycle-step buy-step">
+                    <div class="lifecycle-icon"><i data-lucide="log-in"></i></div>
+                    <div class="lifecycle-info">
+                        <span class="lifecycle-label">BUY &bull; Opened</span>
+                        <strong>{{ trade.buy_price|currency_val(trade.currency) }}</strong>
+                        <small>{{ trade.opened_at }}</small>
+                    </div>
+                </div>
+
+                <div class="lifecycle-connector">
+                    <div class="connector-line"></div>
+                    <span class="connector-duration"><i data-lucide="clock-3"></i> {{ trade.duration_formatted }}</span>
+                </div>
+
+                <div class="lifecycle-step sell-step">
+                    <div class="lifecycle-icon"><i data-lucide="log-out"></i></div>
+                    <div class="lifecycle-info">
+                        <span class="lifecycle-label">SELL &bull; Closed</span>
+                        <strong>{{ trade.sell_price|currency_val(trade.currency) }}</strong>
+                        <small>{{ trade.closed_at }}</small>
+                    </div>
+                </div>
+
+                <div class="lifecycle-volume">
+                    <span class="lifecycle-label">Volume</span>
+                    <strong>{{ trade.quantity|quantity }} units</strong>
+                    <small>Realized return</small>
+                </div>
+            </div>
+        </article>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state" style="padding: 50px 20px;">
+        <i data-lucide="timer-off"></i>
+        <h3>No closed trades recorded yet.</h3>
+        <p>Buy a stock or crypto asset, hold it, and sell it when ready. Its complete trade timeline, holding duration, and realized return will be recorded here.</p>
+        <div style="display:flex; gap:10px; margin-top:10px;">
+            <a class="primary-button" href="{{ url_for('crypto') }}"><i data-lucide="coins"></i>Trade Crypto</a>
+            <a class="secondary-button" href="{{ url_for('stocks') }}"><i data-lucide="landmark"></i>Trade Stocks</a>
+        </div>
+    </div>
+    {% endif %}
+</section>
+{% endblock %}

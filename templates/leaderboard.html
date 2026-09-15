@@ -1,0 +1,25 @@
+<!-- Actual-user paper-trading leaderboard ordered by total paper-account P/L percentage. -->
+{% extends 'base.html' %}
+{% block content %}
+<section class="leaderboard-header">
+    <div>
+        <p class="eyebrow">Paper trading standings</p>
+        <h2>Leaderboard</h2>
+        <p>Ranked by each account's virtual profit or loss percentage. No real money or real trades are used.</p>
+    </div>
+    {% if current_user_entry %}
+    <aside class="current-rank-card"><i data-lucide="trophy"></i><span><small>Your rank</small><strong>#{{ current_user_entry.rank }}</strong></span><em class="{% if current_user_entry.profit_loss_percent >= 0 %}positive{% else %}negative{% endif %}">{{ current_user_entry.profit_loss_percent|signed }}%</em></aside>
+    {% endif %}
+</section>
+
+<section class="leaderboard-note"><i data-lucide="calculator"></i><p>Paper account value combines virtual wallet balances (₹10,00,000 INR & 10,000 USDT) and open market positions across Indian and Global/Crypto markets.</p></section>
+
+<section class="market-table-section leaderboard-table-section">
+    <div class="section-heading"><div><h2>Current standings</h2><p>{{ entries|length }} registered paper trader{% if entries|length != 1 %}s{% endif %}</p></div><span class="data-label"><i data-lucide="refresh-cw"></i>Calculated on page load</span></div>
+    {% if entries %}
+    <div class="table-wrap"><table class="leaderboard-table"><thead><tr><th>Rank</th><th>Trader</th><th class="numeric">Paper account value</th><th class="numeric">Profit / loss</th><th class="numeric">P/L percentage</th></tr></thead><tbody>{% for entry in entries %}<tr class="{% if entry.user_id == current_user['id'] %}is-current-user{% endif %}"><td><span class="rank-badge rank-{{ entry.rank }}">{% if entry.rank <= 3 %}<i data-lucide="{% if entry.rank == 1 %}trophy{% elif entry.rank == 2 %}medal{% else %}award{% endif %}"></i>{% endif %}<strong>{{ entry.rank }}</strong></span></td><td><div class="leaderboard-user"><span class="leaderboard-avatar">{{ entry.full_name[0]|upper }}</span><span><strong>{{ entry.full_name }}{% if entry.user_id == current_user['id'] %}<small>You</small>{% endif %}</strong><small>{% if entry.inr_profit_loss == 0 and entry.usdt_profit_loss == 0 %}Starting balance{% else %}Active paper account{% endif %}</small></span></div></td><td class="numeric"><strong>{{ entry.inr_account_value|inr }}</strong><small>{{ entry.usdt_account_value|usdt }}</small></td><td class="numeric"><b class="{% if entry.inr_profit_loss >= 0 %}positive{% else %}negative{% endif %}">{{ entry.inr_profit_loss|signed_currency('INR') }}</b><small class="{% if entry.usdt_profit_loss >= 0 %}positive{% else %}negative{% endif %}">{{ entry.usdt_profit_loss|signed_currency('USDT') }}</small></td><td class="numeric"><b class="leaderboard-percent {% if entry.profit_loss_percent >= 0 %}positive{% else %}negative{% endif %}">{{ entry.profit_loss_percent|signed }}%</b></td></tr>{% endfor %}</tbody></table></div>
+    {% else %}
+    <div class="empty-state"><i data-lucide="trophy"></i><p>Registered paper traders will appear here.</p></div>
+    {% endif %}
+</section>
+{% endblock %}

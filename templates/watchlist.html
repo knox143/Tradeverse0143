@@ -1,0 +1,48 @@
+<!-- Complete per-user watchlist with authentic logos, price context, remove control, and quick paper orders. -->
+{% extends 'base.html' %}
+{% block content %}
+<section class="market-page-intro watchlist-header">
+    <div>
+        <p class="eyebrow">Your market shortlist</p>
+        <h2>Watchlist</h2>
+        <p>Save Indian stocks, global stocks, and crypto in one place before you decide whether to trade.</p>
+    </div>
+    <a class="primary-button" href="{{ url_for('stocks') }}"><i data-lucide="plus"></i>Add instrument</a>
+</section>
+
+<section class="market-table-section watchlist-table-section">
+    <div class="section-heading">
+        <div><h2>Saved instruments</h2><p>{{ items|length }} asset{% if items|length != 1 %}s{% endif %} in your watchlist</p></div>
+        <span class="data-label"><i data-lucide="star"></i>Personal list</span>
+    </div>
+    {% if items %}
+    <div class="table-wrap">
+        <table class="market-table watchlist-table">
+            <thead><tr><th>Instrument</th><th>Trading Pair</th><th>Market type</th><th class="numeric">Current price</th><th class="numeric">Price change</th><th class="numeric">Change</th><th aria-label="Remove"></th><th aria-label="Quick buy"></th><th aria-label="Quick sell"></th></tr></thead>
+            <tbody>
+                {% for item in items %}
+                <tr>
+                    <td>
+                        <div class="instrument-cell">
+                            <span class="instrument-icon-wrap">{{ item.symbol|asset_icon(item.asset_type, 32) }}</span>
+                            <span><strong>{{ item.name }}</strong><small>{{ item.symbol }}</small></span>
+                        </div>
+                    </td>
+                    <td><span class="pair-tag">{{ item.symbol|market_pair(item.currency) }}</span></td>
+                    <td><span class="market-pill">{{ item.market_type }}</span></td>
+                    <td class="numeric"><strong>{{ item.price|currency_val(item.currency) }}</strong></td>
+                    <td class="numeric"><b class="{% if item.price_change >= 0 %}positive{% else %}negative{% endif %}">{{ item.price_change|signed_currency(item.currency) }}</b></td>
+                    <td class="numeric"><b class="{% if item.change >= 0 %}positive{% else %}negative{% endif %}">{{ item.change|signed }}%</b></td>
+                    <td><button class="icon-button js-watchlist-remove is-saved" type="button" aria-label="Remove {{ item.symbol }} from watchlist" data-symbol="{{ item.symbol }}" data-asset-type="{{ item.asset_type }}"><i data-lucide="star"></i></button></td>
+                    <td><button class="table-action js-trade" type="button" data-symbol="{{ item.symbol }}" data-name="{{ item.name }}" data-asset-type="{{ item.asset_type }}" data-currency="{{ item.currency }}" data-price="{{ item.price }}" data-order-side="BUY">Buy <i data-lucide="arrow-up-right"></i></button></td>
+                    <td><button class="table-action sell-action js-trade" type="button" data-symbol="{{ item.symbol }}" data-name="{{ item.name }}" data-asset-type="{{ item.asset_type }}" data-currency="{{ item.currency }}" data-price="{{ item.price }}" data-order-side="SELL">Sell <i data-lucide="arrow-down-right"></i></button></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state watchlist-empty"><i data-lucide="star"></i><h3>Your watchlist is ready.</h3><p>Use the star on a stock or crypto market row to save an instrument here.</p><div class="empty-state-actions"><a class="primary-button" href="{{ url_for('stocks') }}"><i data-lucide="landmark"></i>Browse stocks</a><a class="secondary-button" href="{{ url_for('crypto') }}"><i data-lucide="bitcoin"></i>Browse crypto</a></div></div>
+    {% endif %}
+</section>
+{% endblock %}
