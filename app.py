@@ -49,6 +49,36 @@ app.config.update(
     SESSION_COOKIE_SAMESITE="Lax",
 )
 
+class VercelPathMiddleware:
+    """Ensure routes match correctly when Vercel serverless rewrites are used."""
+
+    def __init__(self, wsgi_app):
+        self.wsgi_app = wsgi_app
+
+    def __call__(self, environ, start_response):
+        path = environ.get("PATH_INFO", "")
+        if path in ("/api/index.py", "/api/index", "/api"):
+            forwarded = (
+                environ.get("HTTP_X_FORWARDED_URI")
+                or environ.get("HTTP_X_MATCHED_PATH")
+                or "/"
+            )
+            if forwarded.startswith("http://") or forwarded.startswith("https://"):
+                from urllib.parse import urlparse
+                forwarded = urlparse(forwarded).path or "/"
+
+            if "?" in forwarded:
+                f_path, query = forwarded.split("?", 1)
+                environ["PATH_INFO"] = f_path
+                if not environ.get("QUERY_STRING"):
+                    environ["QUERY_STRING"] = query
+            else:
+                environ["PATH_INFO"] = forwarded
+        return self.wsgi_app(environ, start_response)
+
+
+app.wsgi_app = VercelPathMiddleware(app.wsgi_app)
+
 try:
     init_database()
 except Exception as err:

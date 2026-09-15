@@ -2,6 +2,7 @@ import json
 import os
 import shutil
 import sqlite3
+import sys
 from contextlib import closing
 from datetime import datetime
 from pathlib import Path
@@ -33,10 +34,18 @@ def get_database_path():
         if not tmp_db.exists() or tmp_db.stat().st_size == 0:
             try:
                 tmp_db.parent.mkdir(parents=True, exist_ok=True)
-                if SEED_DATABASE_PATH.exists():
-                    # copyfile does NOT copy read-only attributes, ensuring writable DB
-                    shutil.copyfile(str(SEED_DATABASE_PATH), str(tmp_db))
-                else:
+                seed_candidates = [
+                    SEED_DATABASE_PATH,
+                    BASE_DIRECTORY.parent / "database" / "tradeverse.db",
+                    Path("/var/task/database/tradeverse.db"),
+                ]
+                copied = False
+                for seed in seed_candidates:
+                    if seed.exists() and seed.stat().st_size > 0:
+                        shutil.copyfile(str(seed), str(tmp_db))
+                        copied = True
+                        break
+                if not copied:
                     tmp_db.touch()
             except Exception as err:
                 sys.stderr.write(f"Warning initializing /tmp database: {err}\n")
@@ -334,7 +343,27 @@ def _init_database_tables():
         _migrate_database(connection)
         _seed_learning_modules(connection)
         _seed_quiz_questions(connection)
+        _seed_demo_user(connection)
         connection.commit()
+
+
+def _seed_demo_user(connection):
+    """Ensure at least one ready-to-use demo account exists."""
+    try:
+        user_count = connection.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+        if user_count == 0:
+            p_hash = generate_password_hash("password123")
+            cursor = connection.execute(
+                "INSERT INTO users (full_name, email, password_hash) VALUES (?, ?, ?)",
+                ("Demo Trader", "demo@tradeverse.com", p_hash),
+            )
+            u_id = cursor.lastrowid
+            connection.execute(
+                "INSERT INTO wallet (user_id, inr_balance, usdt_balance, cash_balance) VALUES (?, ?, ?, ?)",
+                (u_id, STARTING_INR_BALANCE, STARTING_USDT_BALANCE, STARTING_INR_BALANCE),
+            )
+    except Exception as err:
+        sys.stderr.write(f"Notice during _seed_demo_user: {err}\n")
 
 
 def _seed_learning_modules(connection):
