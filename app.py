@@ -43,8 +43,16 @@ app = Flask(
     template_folder=str(BASE_DIR / "templates"),
     static_folder=str(BASE_DIR / "static"),
 )
+secret_key = (
+    os.environ.get("TRADEVERSE_SECRET_KEY")
+    or os.environ.get("FLASK_SECRET_KEY")
+    or os.environ.get("SECRET_KEY")
+    or ""
+).strip() or "tradeverse-secure-session-key-2026-production"
+
+app.secret_key = secret_key
 app.config.update(
-    SECRET_KEY=os.environ.get("TRADEVERSE_SECRET_KEY", "tradeverse-secure-session-key-2026"),
+    SECRET_KEY=secret_key,
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
 )
