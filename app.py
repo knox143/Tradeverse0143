@@ -199,6 +199,11 @@ app.jinja_env.globals["asset_icon"] = get_asset_svg
 app.jinja_env.globals["market_pair"] = get_market_pair
 
 
+@app.route("/api/ping")
+def ping():
+    return jsonify({"status": "ok", "message": "pong", "deployment": "live"})
+
+
 @app.route("/")
 def index():
     """Send signed-in users to their dashboard and everyone else to login."""
