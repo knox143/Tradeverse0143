@@ -8,6 +8,7 @@ from pathlib import Path
 import sys
 import traceback
 from werkzeug.security import check_password_hash
+from itsdangerous import URLSafeSerializer
 
 from api.crypto import generate_crypto_candles, get_crypto_quote, list_crypto
 from api.icons import get_asset_svg, get_market_pair
@@ -31,6 +32,7 @@ from database import (
     init_database,
     remove_watchlist_item,
     reset_password,
+    restore_user_to_db,
     score_quiz,
     toggle_watchlist_item,
     update_user_profile,
@@ -57,6 +59,66 @@ app.config.update(
     SESSION_COOKIE_SAMESITE="Lax",
 )
 
+vault_serializer = URLSafeSerializer(secret_key, salt="tradeverse-vault-v1")
+
+
+def get_vault_accounts():
+    """Retrieve signed persistent account records stored in the client cookie."""
+    token = request.cookies.get("tv_account_vault")
+    if not token:
+        return {}
+    try:
+        data = vault_serializer.loads(token)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def save_vault_account(response, user_dict):
+    """Save user identity to the signed persistent cookie across Lambda containers."""
+    try:
+        vault = get_vault_accounts()
+        email = str(user_dict["email"]).lower().strip()
+        vault[email] = {
+            "id": user_dict.get("id"),
+            "full_name": user_dict.get("full_name"),
+            "email": email,
+            "password_hash": user_dict.get("password_hash"),
+        }
+        if len(vault) > 10:
+            vault = dict(list(vault.items())[-10:])
+        token = vault_serializer.dumps(vault)
+        response.set_cookie(
+            "tv_account_vault",
+            token,
+            max_age=60 * 60 * 24 * 30,
+            httponly=True,
+            samesite="Lax",
+            secure=request.is_secure,
+        )
+    except Exception as err:
+        sys.stderr.write(f"Vault save error: {err}\n")
+    return response
+
+
+@app.before_request
+def ensure_session_user_in_db():
+    """Ensure user stored in signed session is restored into the local SQLite container."""
+    profile = session.get("user_profile")
+    if profile and isinstance(profile, dict):
+        user_id = profile.get("id") or session.get("user_id")
+        user = get_user_by_id(user_id) if user_id else None
+        if not user:
+            restored_id = restore_user_to_db(
+                profile,
+                wallet=session.get("user_wallet"),
+                watchlist=session.get("watchlist"),
+            )
+            if restored_id:
+                session["user_id"] = restored_id
+                session["user_profile"]["id"] = restored_id
+
+
 try:
     init_database()
 except Exception as err:
@@ -64,12 +126,35 @@ except Exception as err:
 
 
 def login_required(view_function):
-    """Redirect unauthenticated visitors to login before protected views run."""
+    """Redirect unauthenticated visitors or return JSON 401 for API/AJAX requests."""
     @wraps(view_function)
     def wrapped_view(*args, **kwargs):
         user_id = session.get("user_id")
-        if not user_id or not get_user_by_id(user_id):
+        user = get_user_by_id(user_id) if user_id else None
+        if not user:
+            profile = session.get("user_profile")
+            if profile and isinstance(profile, dict):
+                restored_id = restore_user_to_db(
+                    profile,
+                    wallet=session.get("user_wallet"),
+                    watchlist=session.get("watchlist"),
+                )
+                if restored_id:
+                    session["user_id"] = restored_id
+                    user = get_user_by_id(restored_id)
+
+        if not user:
             session.clear()
+            is_api = (
+                request.path.startswith("/api/")
+                or request.path == "/trade"
+                or request.path == "/watchlist/toggle"
+                or request.is_json
+                or "application/json" in request.headers.get("Accept", "")
+                or request.headers.get("X-Requested-With") == "XMLHttpRequest"
+            )
+            if is_api:
+                return jsonify({"ok": False, "error": "unauthorized", "message": "Please sign in to continue."}), 401
             flash("Please sign in to use TradeVerse.", "warning")
             return redirect(url_for("login"))
         return view_function(*args, **kwargs)
@@ -226,30 +311,60 @@ def register():
     if "user_id" in session:
         return redirect(url_for("dashboard"))
     if request.method == "POST":
-        full_name = request.form.get("full_name", "")
-        email = request.form.get("email", "")
-        password = request.form.get("password", "")
-        confirm_password = request.form.get("confirm_password", "")
-        if len(full_name.strip()) < 2:
-            flash("Please enter your full name.", "error")
-        elif "@" not in email or len(email.strip()) < 5:
-            flash("Please enter a valid email address.", "error")
+        payload = request.get_json(silent=True) or request.form
+        full_name = (payload.get("full_name") or "").strip()
+        email = (payload.get("email") or "").strip().lower()
+        password = payload.get("password") or ""
+        confirm_password = payload.get("confirm_password") or ""
+        is_json = request.is_json or "application/json" in request.headers.get("Accept", "")
+
+        err = None
+        if len(full_name) < 2:
+            err = "Please enter your full name."
+        elif "@" not in email or len(email) < 5:
+            err = "Please enter a valid email address."
         elif len(password) < 8:
-            flash("Use a password with at least 8 characters.", "error")
+            err = "Use a password with at least 8 characters."
         elif password != confirm_password:
-            flash("The password confirmation does not match.", "error")
-        else:
-            try:
-                user_id = create_user(full_name, email, password)
-                session.clear()
-                session["user_id"] = user_id
+            err = "The password confirmation does not match."
+
+        if err:
+            if is_json:
+                return jsonify({"ok": False, "message": err}), 400
+            flash(err, "error")
+            return render_template("register.html", page_name="Create account")
+
+        try:
+            user_id = create_user(full_name, email, password)
+            user = get_user_by_id(user_id)
+            session.clear()
+            session.permanent = True
+            session["user_id"] = user_id
+            user_profile = {
+                "id": user["id"],
+                "full_name": user["full_name"],
+                "email": user["email"],
+                "password_hash": user["password_hash"],
+            }
+            session["user_profile"] = user_profile
+            session["user_wallet"] = {"inr": 1000000.0, "usdt": 10000.0}
+            session["watchlist"] = []
+
+            if is_json:
+                resp = jsonify({"ok": True, "message": "Welcome to TradeVerse. Your virtual wallet is ready.", "redirect": url_for("dashboard")})
+            else:
                 flash("Welcome to TradeVerse. Your virtual wallet is ready.", "success")
-                return redirect(url_for("dashboard"))
-            except ValueError as error:
-                flash(str(error), "error")
-            except Exception as error:
-                sys.stderr.write(f"Registration error: {error}\n{traceback.format_exc()}\n")
-                flash("Could not complete registration. Please try again.", "error")
+                resp = redirect(url_for("dashboard"))
+            return save_vault_account(resp, user_profile)
+        except ValueError as error:
+            if is_json:
+                return jsonify({"ok": False, "message": str(error)}), 400
+            flash(str(error), "error")
+        except Exception as error:
+            sys.stderr.write(f"Registration error: {error}\n{traceback.format_exc()}\n")
+            if is_json:
+                return jsonify({"ok": False, "message": "Could not complete registration. Please try again."}), 500
+            flash("Could not complete registration. Please try again.", "error")
     return render_template("register.html", page_name="Create account")
 
 
@@ -259,18 +374,58 @@ def login():
     if "user_id" in session:
         return redirect(url_for("dashboard"))
     if request.method == "POST":
-        email = request.form.get("email", "")
-        password = request.form.get("password", "")
+        payload = request.get_json(silent=True) or request.form
+        email = (payload.get("email") or "").strip().lower()
+        password = payload.get("password") or ""
+        is_json = request.is_json or "application/json" in request.headers.get("Accept", "")
+
         try:
             user = get_user_by_email(email)
+            if not user:
+                vault = get_vault_accounts()
+                vault_entry = vault.get(email)
+                if vault_entry and check_password_hash(vault_entry.get("password_hash", ""), password):
+                    restored_id = restore_user_to_db(vault_entry)
+                    user = get_user_by_id(restored_id) or get_user_by_email(email)
+
             if user and check_password_hash(user["password_hash"], password):
                 session.clear()
+                session.permanent = True
                 session["user_id"] = user["id"]
-                flash(f"Welcome back, {user['full_name'].split()[0]}.", "success")
-                return redirect(url_for("dashboard"))
-            flash("That email and password combination was not recognized.", "error")
+                user_profile = {
+                    "id": user["id"],
+                    "full_name": user["full_name"],
+                    "email": user["email"],
+                    "password_hash": user["password_hash"],
+                }
+                session["user_profile"] = user_profile
+                wallet = get_wallet(user["id"])
+                if wallet:
+                    session["user_wallet"] = wallet
+
+                wl = get_watchlist(user["id"])
+                if wl:
+                    session["watchlist"] = [f"{item['asset_type']}:{item['symbol']}" for item in wl]
+
+                if is_json:
+                    resp = jsonify({
+                        "ok": True,
+                        "message": f"Welcome back, {user['full_name'].split()[0]}.",
+                        "redirect": url_for("dashboard"),
+                    })
+                else:
+                    flash(f"Welcome back, {user['full_name'].split()[0]}.", "success")
+                    resp = redirect(url_for("dashboard"))
+                return save_vault_account(resp, user_profile)
+
+            msg = "That email and password combination was not recognized."
+            if is_json:
+                return jsonify({"ok": False, "message": msg}), 401
+            flash(msg, "error")
         except Exception as error:
             sys.stderr.write(f"Login error: {error}\n{traceback.format_exc()}\n")
+            if is_json:
+                return jsonify({"ok": False, "message": "Sign in service temporarily unavailable. Please try again."}), 500
             flash("Sign in service temporarily unavailable. Please try again.", "error")
     return render_template("login.html", page_name="Sign in")
 
@@ -463,8 +618,19 @@ def profile():
     if request.method == "POST":
         try:
             update_user_profile(user_id, request.form.get("full_name", ""), request.form.get("email", ""))
+            user = get_user_by_id(user_id)
+            if user:
+                session["user_profile"] = {
+                    "id": user["id"],
+                    "full_name": user["full_name"],
+                    "email": user["email"],
+                    "password_hash": user["password_hash"],
+                }
             flash("Your profile details were updated.", "success")
-            return redirect(url_for("profile"))
+            resp = redirect(url_for("profile"))
+            if user:
+                return save_vault_account(resp, session["user_profile"])
+            return resp
         except ValueError as error:
             flash(str(error), "error")
     return render_template(
@@ -497,6 +663,7 @@ def trade():
             quantity,
             quote["price"],
         )
+        session["user_wallet"] = {"inr": result["inr_balance"], "usdt": result["usdt_balance"]}
         formatted_total = f"₹{result['total_amount']:,.2f} INR" if result["currency"] == "INR" else f"{result['total_amount']:,.2f} USDT"
         msg = f"{result['side']} order completed for {result['quantity']:g} {result['symbol']} ({formatted_total})."
         if result.get("duration_formatted"):
@@ -525,6 +692,8 @@ def watchlist_toggle():
     if not symbol or asset_type not in {"stock", "crypto"}:
         return jsonify({"ok": False, "message": "A valid market symbol is required."}), 400
     is_saved = toggle_watchlist_item(session["user_id"], symbol, asset_type)
+    wl = get_watchlist(session["user_id"])
+    session["watchlist"] = [f"{item['asset_type']}:{item['symbol']}" for item in wl]
     return jsonify({"ok": True, "saved": is_saved, "message": "Added to watchlist." if is_saved else "Removed from watchlist."})
 
 
@@ -548,6 +717,8 @@ def add_watchlist_api():
         return jsonify({"ok": False, "message": "That market symbol is not available."}), 404
     try:
         was_added = add_watchlist_item(session["user_id"], quote["symbol"], asset_type)
+        wl = get_watchlist(session["user_id"])
+        session["watchlist"] = [f"{item['asset_type']}:{item['symbol']}" for item in wl]
     except ValueError as error:
         return jsonify({"ok": False, "message": str(error)}), 400
     message = "Added to watchlist." if was_added else "This symbol is already in your watchlist."
@@ -563,6 +734,8 @@ def remove_watchlist_api(asset_type, symbol):
     was_removed = remove_watchlist_item(session["user_id"], symbol, asset_type)
     if not was_removed:
         return jsonify({"ok": False, "message": "That symbol is not in your watchlist."}), 404
+    wl = get_watchlist(session["user_id"])
+    session["watchlist"] = [f"{item['asset_type']}:{item['symbol']}" for item in wl]
     return jsonify({"ok": True, "saved": False, "message": "Removed from watchlist."})
 
 

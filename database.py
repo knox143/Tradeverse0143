@@ -503,6 +503,77 @@ def get_user_by_id(user_id):
         return connection.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
 
 
+def restore_user_to_db(user_data, wallet=None, watchlist=None):
+    """Restore a user record, wallet, and watchlist into the local SQLite database if absent."""
+    if not user_data or not user_data.get("email"):
+        return None
+    user_id = user_data.get("id")
+    full_name = str(user_data.get("full_name") or "Paper Trader").strip()
+    email = str(user_data["email"]).lower().strip()
+    password_hash = user_data.get("password_hash") or generate_password_hash("password123")
+    created_at = user_data.get("created_at") or datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+
+    inr_bal = float(wallet.get("inr", STARTING_INR_BALANCE)) if (wallet and "inr" in wallet) else STARTING_INR_BALANCE
+    usdt_bal = float(wallet.get("usdt", STARTING_USDT_BALANCE)) if (wallet and "usdt" in wallet) else STARTING_USDT_BALANCE
+
+    with closing(get_connection()) as connection:
+        try:
+            existing = connection.execute(
+                "SELECT id FROM users WHERE email = ?",
+                (email,),
+            ).fetchone()
+            if existing:
+                actual_id = existing["id"]
+            else:
+                if user_id:
+                    cursor = connection.execute(
+                        "INSERT OR IGNORE INTO users (id, full_name, email, password_hash, created_at) VALUES (?, ?, ?, ?, ?)",
+                        (user_id, full_name, email, password_hash, created_at),
+                    )
+                    if cursor.rowcount > 0:
+                        actual_id = user_id
+                    else:
+                        cursor = connection.execute(
+                            "INSERT INTO users (full_name, email, password_hash, created_at) VALUES (?, ?, ?, ?)",
+                            (full_name, email, password_hash, created_at),
+                        )
+                        actual_id = cursor.lastrowid
+                else:
+                    cursor = connection.execute(
+                        "INSERT INTO users (full_name, email, password_hash, created_at) VALUES (?, ?, ?, ?)",
+                        (full_name, email, password_hash, created_at),
+                    )
+                    actual_id = cursor.lastrowid
+
+            w_row = connection.execute("SELECT user_id FROM wallet WHERE user_id = ?", (actual_id,)).fetchone()
+            if not w_row:
+                connection.execute(
+                    "INSERT OR IGNORE INTO wallet (user_id, inr_balance, usdt_balance, cash_balance) VALUES (?, ?, ?, ?)",
+                    (actual_id, inr_bal, usdt_bal, inr_bal),
+                )
+            elif wallet:
+                connection.execute(
+                    "UPDATE wallet SET inr_balance = ?, usdt_balance = ?, cash_balance = ? WHERE user_id = ?",
+                    (inr_bal, usdt_bal, inr_bal, actual_id),
+                )
+
+            if watchlist and isinstance(watchlist, (list, set)):
+                for item in watchlist:
+                    if isinstance(item, str) and ":" in item:
+                        atype, sym = item.split(":", 1)
+                        if atype in {"stock", "crypto"}:
+                            connection.execute(
+                                "INSERT OR IGNORE INTO watchlist (user_id, symbol, asset_type) VALUES (?, ?, ?)",
+                                (actual_id, sym.upper().strip(), atype),
+                            )
+
+            connection.commit()
+            return actual_id
+        except Exception as err:
+            sys.stderr.write(f"Notice during restore_user_to_db: {err}\n")
+            return None
+
+
 def get_all_users():
     """Return the registered accounts used by the paper-trading leaderboard."""
     with closing(get_connection()) as connection:

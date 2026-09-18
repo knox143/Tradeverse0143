@@ -73,9 +73,12 @@
         try {
             const resp = await fetch(`/api/icon/${encodeURIComponent(assetType)}/${encodeURIComponent(symbol)}?size=${size}`);
             if (resp.ok) {
-                const data = await resp.json();
-                if (data.ok && data.svg) {
-                    element.innerHTML = data.svg;
+                const ct = resp.headers.get("content-type") || "";
+                if (ct.includes("application/json")) {
+                    const data = await resp.json();
+                    if (data.ok && data.svg) {
+                        element.innerHTML = data.svg;
+                    }
                 }
             }
         } catch (e) {}
@@ -153,7 +156,7 @@
         try {
             const response = await fetch("/trade", {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: { "Content-Type": "application/json", "Accept": "application/json" },
                 body: JSON.stringify({
                     symbol: tradeSymbol.value,
                     asset_type: tradeAssetType.value,
@@ -161,6 +164,15 @@
                     quantity: tradeQuantity.value,
                 }),
             });
+            if (response.status === 401) {
+                showToast("Please sign in to place orders.", true);
+                window.setTimeout(() => { window.location.href = "/login"; }, 1200);
+                return;
+            }
+            const ct = response.headers.get("content-type") || "";
+            if (!ct.includes("application/json")) {
+                throw new Error("Server returned an unexpected response. Please refresh.");
+            }
             const result = await response.json();
             if (!response.ok || !result.ok) {
                 throw new Error(result.message || "The virtual order could not be completed.");
@@ -193,9 +205,18 @@
         try {
             const response = await fetch("/watchlist/toggle", {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: { "Content-Type": "application/json", "Accept": "application/json" },
                 body: JSON.stringify({ symbol: button.dataset.symbol, asset_type: button.dataset.assetType }),
             });
+            if (response.status === 401) {
+                showToast("Please sign in to update your watchlist.", true);
+                window.setTimeout(() => { window.location.href = "/login"; }, 1200);
+                return;
+            }
+            const ct = response.headers.get("content-type") || "";
+            if (!ct.includes("application/json")) {
+                throw new Error("Watchlist service temporarily unavailable.");
+            }
             const result = await response.json();
             if (!response.ok || !result.ok) {
                 throw new Error(result.message || "Watchlist update failed.");
@@ -215,7 +236,19 @@
         try {
             const assetType = encodeURIComponent(button.dataset.assetType);
             const symbol = encodeURIComponent(button.dataset.symbol);
-            const response = await fetch(`/api/watchlist/${assetType}/${symbol}`, { method: "DELETE" });
+            const response = await fetch(`/api/watchlist/${assetType}/${symbol}`, {
+                method: "DELETE",
+                headers: { "Accept": "application/json" },
+            });
+            if (response.status === 401) {
+                showToast("Please sign in to update your watchlist.", true);
+                window.setTimeout(() => { window.location.href = "/login"; }, 1200);
+                return;
+            }
+            const ct = response.headers.get("content-type") || "";
+            if (!ct.includes("application/json")) {
+                throw new Error("Watchlist service temporarily unavailable.");
+            }
             const result = await response.json();
             if (!response.ok || !result.ok) {
                 throw new Error(result.message || "Watchlist update failed.");
@@ -248,7 +281,18 @@
         refreshIcons();
 
         try {
-            const response = await fetch(`/api/chart/${encodeURIComponent(assetType)}/${encodeURIComponent(symbol)}?timeframe=${encodeURIComponent(tf)}`);
+            const response = await fetch(`/api/chart/${encodeURIComponent(assetType)}/${encodeURIComponent(symbol)}?timeframe=${encodeURIComponent(tf)}`, {
+                headers: { "Accept": "application/json" },
+            });
+            if (response.status === 401) {
+                container.innerHTML = `<div class="chart-error"><i data-lucide="log-in"></i><span>Please <a href="/login">sign in</a> to view live chart data.</span></div>`;
+                refreshIcons();
+                return;
+            }
+            const ct = response.headers.get("content-type") || "";
+            if (!ct.includes("application/json")) {
+                throw new Error("Invalid response format received from server.");
+            }
             const result = await response.json();
             if (!result.ok || !result.candles || result.candles.length === 0) {
                 throw new Error(result.message || "No candle data available");
