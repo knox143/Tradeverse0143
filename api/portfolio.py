@@ -121,9 +121,3 @@ def calculate_leaderboard(quote_lookup):
     for rank, entry in enumerate(entries, start=1):
         entry["rank"] = rank
     return entries
-
-
-# Vercel serverless fallback handler
-def handler(*args, **kwargs):
-    from app import app
-    return app(*args, **kwargs)

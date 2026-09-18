@@ -36,11 +36,6 @@
         return `${formatted} USDT`;
     }
 
-    /** Compatibility helper for formatCurrency. */
-    function credits(value, currency = activeTradeCurrency) {
-        return formatCurrency(value, currency);
-    }
-
     /** Show a short, accessible status notice without disrupting the page layout. */
     function showToast(message, isError) {
         if (!toastRegion) return;

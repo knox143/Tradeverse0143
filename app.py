@@ -13,7 +13,7 @@ from itsdangerous import URLSafeSerializer
 from api.crypto import generate_crypto_candles, get_crypto_quote, list_crypto
 from api.icons import get_asset_svg, get_market_pair
 from api.portfolio import calculate_leaderboard, calculate_portfolio
-from api.stocks import generate_candles, get_company_profile, get_stock_quote, list_stocks
+from api.stocks import generate_candles, get_stock_quote, list_stocks
 from database import (
     add_watchlist_item,
     create_user,

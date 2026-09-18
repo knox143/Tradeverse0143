@@ -59,7 +59,6 @@ def get_database_path():
 
 STARTING_INR_BALANCE = 1_000_000.00
 STARTING_USDT_BALANCE = 10_000.00
-STARTING_WALLET_BALANCE = STARTING_INR_BALANCE
 
 
 def format_duration(seconds):
@@ -620,14 +619,6 @@ def get_wallet(user_id):
             usdt = float(row["usdt_balance"]) if row["usdt_balance"] is not None else 0.0
             return {"inr": inr, "usdt": usdt}
         return {"inr": 0.0, "usdt": 0.0}
-
-
-def get_wallet_balance(user_id, currency="INR"):
-    """Return a user's current paper-credit balance for the given currency."""
-    wallet = get_wallet(user_id)
-    if currency and currency.upper() == "USDT":
-        return wallet["usdt"]
-    return wallet["inr"]
 
 
 def get_currency_for_asset(symbol, asset_type):

@@ -1,6 +1,5 @@
 """Crypto quote helpers with live real-time feeds, caching, and fallback adapters."""
 
-import json
 import os
 import time
 from datetime import date, datetime, timedelta

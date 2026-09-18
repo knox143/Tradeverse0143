@@ -211,25 +211,6 @@ def list_stocks(query="", market="All"):
         return list(executor.map(_refresh, filtered))
 
 
-
-def get_company_profile(symbol):
-    """Request a small Finnhub company profile only when a Finnhub key is set."""
-    api_key = os.environ.get("FINNHUB_API_KEY")
-    if not api_key:
-        return None
-    query = urlencode({"symbol": symbol, "token": api_key})
-    try:
-        with urlopen(f"https://finnhub.io/api/v1/stock/profile2?{query}", timeout=4) as response:
-            payload = json.load(response)
-        return {
-            "industry": payload.get("finnhubIndustry", "Market data"),
-            "country": payload.get("country", "Global"),
-            "website": payload.get("weburl", ""),
-        }
-    except (URLError, TimeoutError, ValueError):
-        return None
-
-
 def generate_candles(symbol, current_price, days=45):
     """Fetch real historical candlestick data or fallback to calibrated generator."""
     cached = _candle_cache.get(symbol)
