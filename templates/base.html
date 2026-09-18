@@ -50,7 +50,7 @@
                     <p class="eyebrow">Paper trading workspace</p>
                     <h1>{{ page_name }}</h1>
                 </div>
-                <div class="market-status"><span class="status-dot"></span>Practice market open</div>
+                <div class="market-status" title="Market quotes are provided by free tier exchange feeds (10–15 minutes delayed)"><span class="status-dot"></span><span>Practice Market</span><span class="market-delay-badge"><i data-lucide="clock"></i>10–15m Delayed</span></div>
             </header>
             <main class="page-content">
                 {% include '_flash_messages.html' %}
@@ -102,7 +102,7 @@
             <input class="field-input" id="trade-quantity" name="quantity" type="number" min="0.0001" step="0.0001" value="1" required>
             <div class="order-estimate"><span>Reference price</span><strong id="trade-price">--</strong><span>Estimated value</span><strong id="trade-total">--</strong></div>
             <button class="primary-button order-submit" type="submit"><i data-lucide="arrow-left-right"></i>Place virtual order</button>
-            <p class="form-note">Orders use virtual practice credits (INR for Indian stocks, USDT for Global & Crypto) and never place a real market order.</p>
+            <p class="form-note">Orders use virtual credits (INR for Indian stocks, USDT for Global &amp; Crypto). Free tier exchange feeds are subject to a 10–15 min delay.</p>
         </form>
     </dialog>
     {% endif %}
