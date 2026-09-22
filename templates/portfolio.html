@@ -7,8 +7,7 @@
         <h2>Your portfolio, in one place.</h2>
         <p>Current values estimated from real-time live quotes in INR ₹ & USDT with official company and crypto logos.</p>
     </div>
-    <div style="display: flex; gap: 10px;">
-        <a class="secondary-button" href="{{ url_for('timeline') }}"><i data-lucide="timer"></i>Trade Timeline</a>
+    <div>
         <a class="primary-button" href="{{ url_for('stocks') }}"><i data-lucide="plus"></i>New trade</a>
     </div>
 </section>
@@ -44,7 +43,7 @@
     <div class="section-heading">
         <div>
             <p class="eyebrow">Active positions</p>
-            <h2>Current holdings & holding duration</h2>
+            <h2>Current holdings</h2>
         </div>
         <span class="data-label"><i data-lucide="wallet"></i><span data-wallet-inr>{{ portfolio.inr_wallet|inr }}</span> &bull; <span data-wallet-usdt>{{ portfolio.usdt_wallet|usdt }}</span> available</span>
     </div>
@@ -56,7 +55,6 @@
                     <th>Instrument</th>
                     <th>Trading Pair</th>
                     <th>Units</th>
-                    <th>Time Open (Age)</th>
                     <th class="numeric">Average price</th>
                     <th class="numeric">Current price</th>
                     <th class="numeric">Investment</th>
@@ -76,9 +74,6 @@
                     </td>
                     <td><span class="pair-tag">{{ holding.symbol|market_pair(holding.currency) }}</span></td>
                     <td>{{ holding.quantity|quantity }}</td>
-                    <td>
-                        <span class="duration-badge active"><i data-lucide="clock"></i> {{ holding.position_age_formatted }}</span>
-                    </td>
                     <td class="numeric">{{ holding.average_price|currency_val(holding.currency) }}</td>
                     <td class="numeric"><strong>{{ holding.current_price|currency_val(holding.currency) }}</strong></td>
                     <td class="numeric">{{ holding.cost_basis|currency_val(holding.currency) }}</td>
@@ -110,15 +105,14 @@
     {% endif %}
 </section>
 
-<!-- Closed Trades Timeline Section -->
+<!-- Closed Trades Section -->
 <section class="table-section" style="margin-top: 24px;">
     <div class="section-heading">
         <div>
-            <p class="eyebrow">Closed Trades Timeline</p>
-            <h2>Trade Lifecycle & Duration History</h2>
-            <p>How long each completed trade took from open (BUY) to close (SELL) with net realized gains.</p>
+            <p class="eyebrow">Closed Positions</p>
+            <h2>Trade History</h2>
+            <p>Completed trades with net realized gains in INR and USDT.</p>
         </div>
-        <a class="text-link" href="{{ url_for('timeline') }}">Full Timeline Page <i data-lucide="arrow-right"></i></a>
     </div>
     {% if closed_trades %}
     <div class="table-wrap">
@@ -126,7 +120,6 @@
             <thead>
                 <tr>
                     <th>Instrument</th>
-                    <th>Time to Close (Duration)</th>
                     <th class="numeric">Buy Price</th>
                     <th class="numeric">Sell Price</th>
                     <th class="numeric">Units</th>
@@ -143,9 +136,6 @@
                             <span><strong>{{ trade.symbol }}</strong><small><span class="pair-tag">{{ trade.symbol|market_pair(trade.currency) }}</span></small></span>
                         </div>
                     </td>
-                    <td>
-                        <span class="duration-badge"><i data-lucide="timer"></i> Closed in {{ trade.duration_formatted }}</span>
-                    </td>
                     <td class="numeric">{{ trade.buy_price|currency_val(trade.currency) }}</td>
                     <td class="numeric"><strong>{{ trade.sell_price|currency_val(trade.currency) }}</strong></td>
                     <td class="numeric">{{ trade.quantity|quantity }}</td>
@@ -161,8 +151,8 @@
     </div>
     {% else %}
     <div class="empty-state horizontal">
-        <i data-lucide="timer-off"></i>
-        <p>No trades have been closed yet. When you sell an active holding, its duration and timeline will appear here.</p>
+        <i data-lucide="history"></i>
+        <p>No trades have been closed yet. When you sell an active holding, your realized profit/loss and trade details will appear here.</p>
     </div>
     {% endif %}
 </section>

@@ -25,7 +25,6 @@
                 <a class="nav-link {% if request.endpoint == 'stocks' %}is-active{% endif %}" href="{{ url_for('stocks') }}"><i data-lucide="landmark"></i>Stocks</a>
                 <a class="nav-link {% if request.endpoint == 'crypto' %}is-active{% endif %}" href="{{ url_for('crypto') }}"><i data-lucide="bitcoin"></i>Crypto</a>
                 <a class="nav-link {% if request.endpoint == 'portfolio' %}is-active{% endif %}" href="{{ url_for('portfolio') }}"><i data-lucide="briefcase-business"></i>Portfolio</a>
-                <a class="nav-link {% if request.endpoint == 'timeline' %}is-active{% endif %}" href="{{ url_for('timeline') }}"><i data-lucide="clock"></i>Trade Timeline</a>
                 <a class="nav-link {% if request.endpoint == 'watchlist' %}is-active{% endif %}" href="{{ url_for('watchlist') }}"><i data-lucide="star"></i>Watchlist</a>
                 <a class="nav-link {% if request.endpoint == 'leaderboard' %}is-active{% endif %}" href="{{ url_for('leaderboard') }}"><i data-lucide="trophy"></i>Leaderboard</a>
             </nav>
