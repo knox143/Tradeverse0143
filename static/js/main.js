@@ -182,6 +182,23 @@
                     element.textContent = formatCurrency(result.usdt_balance, "USDT");
                 });
             }
+
+            // Persist to client-side localStorage as backup against ephemeral serverless restarts
+            try {
+                const uId = window.currentUserId || "active";
+                if (result.portfolio) {
+                    localStorage.setItem(`tv_portfolio_${uId}`, JSON.stringify(result.portfolio));
+                }
+                if (result.wallet) {
+                    localStorage.setItem(`tv_wallet_${uId}`, JSON.stringify(result.wallet));
+                }
+                if (result.transactions) {
+                    localStorage.setItem(`tv_transactions_${uId}`, JSON.stringify(result.transactions));
+                }
+            } catch (storageErr) {
+                console.warn("Storage backup notice:", storageErr);
+            }
+
             tradeDialog.close();
             showToast(result.message, false);
             window.setTimeout(() => window.location.reload(), 800);
@@ -624,9 +641,47 @@
         });
     }
 
+    /** Auto-sync holdings from client-side backup if server database woke up empty. */
+    async function checkAndSyncPortfolioBackup() {
+        if (!window.currentUserId) return;
+        const uId = window.currentUserId;
+        const savedPortfolio = localStorage.getItem(`tv_portfolio_${uId}`);
+        if (!savedPortfolio) return;
+
+        try {
+            const parsed = JSON.parse(savedPortfolio);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+                const isPortfolioPage = document.querySelector(".portfolio-stats") !== null;
+                const hasNoHoldings = !document.querySelector(".holdings-table tbody tr");
+                if (isPortfolioPage && hasNoHoldings) {
+                    const savedWallet = localStorage.getItem(`tv_wallet_${uId}`);
+                    const savedTx = localStorage.getItem(`tv_transactions_${uId}`);
+                    const res = await fetch("/api/sync-state", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json", "Accept": "application/json" },
+                        body: JSON.stringify({
+                            portfolio: parsed,
+                            wallet: savedWallet ? JSON.parse(savedWallet) : null,
+                            transactions: savedTx ? JSON.parse(savedTx) : null,
+                        }),
+                    });
+                    if (res.ok) {
+                        const data = await res.json();
+                        if (data.ok) {
+                            window.location.reload();
+                        }
+                    }
+                }
+            }
+        } catch (e) {
+            console.warn("Portfolio auto-recovery notice:", e);
+        }
+    }
+
     /** Connect every page-local interaction once the DOM is ready. */
     function initializePage() {
         refreshIcons();
+        checkAndSyncPortfolioBackup();
         document.querySelectorAll(".js-trade").forEach((trigger) => trigger.addEventListener("click", () => openTradeDialog(trigger)));
         document.querySelectorAll(".js-watchlist").forEach((button) => button.addEventListener("click", () => toggleWatchlist(button)));
         document.querySelectorAll(".js-watchlist-remove").forEach((button) => button.addEventListener("click", () => removeWatchlistItem(button)));

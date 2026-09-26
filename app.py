@@ -15,11 +15,14 @@ from api.icons import get_asset_svg, get_market_pair
 from api.portfolio import calculate_leaderboard, calculate_portfolio
 from api.stocks import generate_candles, get_stock_quote, list_stocks
 from database import (
+    STARTING_INR_BALANCE,
+    STARTING_USDT_BALANCE,
     add_watchlist_item,
     create_user,
     execute_trade,
     get_closed_trades,
     get_learning_modules,
+    get_portfolio_rows,
     get_quiz_questions,
     get_quiz_results,
     get_trade_timeline_stats,
@@ -28,10 +31,11 @@ from database import (
     get_user_by_id,
     get_wallet,
     get_watchlist,
-    is_watchlist_item,
     init_database,
+    is_watchlist_item,
     remove_watchlist_item,
     reset_password,
+    reset_wallet,
     restore_user_to_db,
     score_quiz,
     toggle_watchlist_item,
@@ -113,10 +117,27 @@ def ensure_session_user_in_db():
                 profile,
                 wallet=session.get("user_wallet"),
                 watchlist=session.get("watchlist"),
+                portfolio=session.get("user_portfolio"),
+                transactions=session.get("user_transactions"),
+                closed_trades=session.get("user_closed_trades"),
             )
             if restored_id:
                 session["user_id"] = restored_id
                 session["user_profile"]["id"] = restored_id
+        else:
+            # If user exists in DB but holdings table is empty and session has portfolio, restore them
+            session_portfolio = session.get("user_portfolio")
+            if session_portfolio and isinstance(session_portfolio, list) and len(session_portfolio) > 0:
+                db_holdings = get_portfolio_rows(user_id)
+                if not db_holdings or len(db_holdings) == 0:
+                    restore_user_to_db(
+                        profile,
+                        wallet=session.get("user_wallet"),
+                        watchlist=session.get("watchlist"),
+                        portfolio=session_portfolio,
+                        transactions=session.get("user_transactions"),
+                        closed_trades=session.get("user_closed_trades"),
+                    )
 
 
 try:
@@ -138,6 +159,9 @@ def login_required(view_function):
                     profile,
                     wallet=session.get("user_wallet"),
                     watchlist=session.get("watchlist"),
+                    portfolio=session.get("user_portfolio"),
+                    transactions=session.get("user_transactions"),
+                    closed_trades=session.get("user_closed_trades"),
                 )
                 if restored_id:
                     session["user_id"] = restored_id
@@ -663,7 +687,64 @@ def trade():
             quantity,
             quote["price"],
         )
+        user_id = session["user_id"]
         session["user_wallet"] = {"inr": result["inr_balance"], "usdt": result["usdt_balance"]}
+
+        # Persist updated portfolio holdings in session for serverless recovery
+        updated_holdings = [
+            {
+                "symbol": h["symbol"],
+                "asset_type": h["asset_type"],
+                "asset_name": h["asset_name"],
+                "currency": h["currency"],
+                "quantity": float(h["quantity"]),
+                "average_price": float(h["average_price"]),
+                "opened_at": h["opened_at"],
+                "updated_at": h["updated_at"],
+            }
+            for h in get_portfolio_rows(user_id)
+        ]
+        session["user_portfolio"] = updated_holdings
+
+        # Persist transactions in session for serverless recovery
+        updated_transactions = [
+            {
+                "symbol": t["symbol"],
+                "asset_type": t["asset_type"],
+                "asset_name": t["asset_name"],
+                "currency": t["currency"],
+                "trade_type": t["trade_type"],
+                "quantity": float(t["quantity"]),
+                "price": float(t["price"]),
+                "total_amount": float(t["total_amount"]),
+                "created_at": t["created_at"],
+            }
+            for t in get_transactions(user_id, limit=20)
+        ]
+        session["user_transactions"] = updated_transactions
+
+        # Persist closed trades in session for serverless recovery
+        updated_closed = [
+            {
+                "symbol": c["symbol"],
+                "asset_type": c["asset_type"],
+                "asset_name": c["asset_name"],
+                "currency": c["currency"],
+                "quantity": float(c["quantity"]),
+                "buy_price": float(c["buy_price"]),
+                "sell_price": float(c["sell_price"]),
+                "buy_time": c["buy_time"],
+                "sell_time": c["sell_time"],
+                "duration_seconds": c["duration_seconds"],
+                "duration_formatted": c["duration_formatted"],
+                "realized_pnl": float(c["realized_pnl"]),
+                "realized_pnl_percent": float(c["realized_pnl_percent"]),
+                "created_at": c["created_at"],
+            }
+            for c in get_closed_trades(user_id, limit=20)
+        ]
+        session["user_closed_trades"] = updated_closed
+
         formatted_total = f"₹{result['total_amount']:,.2f} INR" if result["currency"] == "INR" else f"{result['total_amount']:,.2f} USDT"
         msg = f"{result['side']} order completed for {result['quantity']:g} {result['symbol']} ({formatted_total})."
         if result.get("duration_formatted"):
@@ -676,10 +757,55 @@ def trade():
         return jsonify({
             "ok": True,
             "message": msg,
+            "portfolio": updated_holdings,
+            "transactions": updated_transactions,
+            "wallet": {"inr": result["inr_balance"], "usdt": result["usdt_balance"]},
             **result,
         })
     except (TypeError, ValueError) as error:
         return jsonify({"ok": False, "message": str(error)}), 400
+
+
+@app.post("/api/sync-state")
+@login_required
+def sync_state():
+    """Synchronize user portfolio and wallet from client-side browser storage if serverless DB restarted."""
+    payload = request.get_json(silent=True) or {}
+    holdings = payload.get("portfolio")
+    wallet = payload.get("wallet")
+    transactions = payload.get("transactions")
+    closed_trades = payload.get("closed_trades")
+    user_id = session["user_id"]
+    profile = session.get("user_profile") or dict(get_user_by_id(user_id))
+
+    restore_user_to_db(
+        profile,
+        wallet=wallet or session.get("user_wallet"),
+        watchlist=session.get("watchlist"),
+        portfolio=holdings or session.get("user_portfolio"),
+        transactions=transactions or session.get("user_transactions"),
+        closed_trades=closed_trades or session.get("user_closed_trades"),
+    )
+    if holdings:
+        session["user_portfolio"] = holdings
+    if wallet:
+        session["user_wallet"] = wallet
+    if transactions:
+        session["user_transactions"] = transactions
+    if closed_trades:
+        session["user_closed_trades"] = closed_trades
+    return jsonify({"ok": True, "message": "State synced successfully."})
+
+
+@app.post("/wallet/reset")
+@login_required
+def reset_wallet_route():
+    """Reset virtual practice balance back to starting amounts (₹1,000,000 INR & 10,000 USDT)."""
+    user_id = session["user_id"]
+    reset_wallet(user_id)
+    session["user_wallet"] = {"inr": STARTING_INR_BALANCE, "usdt": STARTING_USDT_BALANCE}
+    flash("Your virtual practice wallet has been reset to starting balances (₹10,00,000 INR & 10,000 USDT).", "success")
+    return redirect(url_for("portfolio"))
 
 
 @app.post("/watchlist/toggle")

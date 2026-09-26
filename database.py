@@ -502,8 +502,8 @@ def get_user_by_id(user_id):
         return connection.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
 
 
-def restore_user_to_db(user_data, wallet=None, watchlist=None):
-    """Restore a user record, wallet, and watchlist into the local SQLite database if absent."""
+def restore_user_to_db(user_data, wallet=None, watchlist=None, portfolio=None, transactions=None, closed_trades=None):
+    """Restore a user record, wallet, watchlist, portfolio holdings, and trades into the local SQLite database if absent."""
     if not user_data or not user_data.get("email"):
         return None
     user_id = user_data.get("id")
@@ -566,11 +566,109 @@ def restore_user_to_db(user_data, wallet=None, watchlist=None):
                                 (actual_id, sym.upper().strip(), atype),
                             )
 
+            # Restore active portfolio holdings
+            if portfolio and isinstance(portfolio, list):
+                for h in portfolio:
+                    if isinstance(h, dict) and h.get("symbol") and float(h.get("quantity", 0)) > 0:
+                        connection.execute(
+                            """INSERT OR REPLACE INTO portfolio
+                            (user_id, symbol, asset_type, asset_name, currency, quantity, average_price, opened_at, updated_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                            (
+                                actual_id,
+                                str(h["symbol"]).upper().strip(),
+                                str(h.get("asset_type", "stock")),
+                                str(h.get("asset_name", h["symbol"])),
+                                str(h.get("currency", "INR")),
+                                float(h["quantity"]),
+                                float(h.get("average_price", 0)),
+                                str(h.get("opened_at") or datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")),
+                                str(h.get("updated_at") or datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")),
+                            ),
+                        )
+
+            # Restore transactions ledger
+            if transactions and isinstance(transactions, list):
+                for tx in transactions:
+                    if isinstance(tx, dict) and tx.get("symbol") and float(tx.get("quantity", 0)) > 0:
+                        connection.execute(
+                            """INSERT OR IGNORE INTO transactions
+                            (user_id, symbol, asset_type, asset_name, currency, trade_type, quantity, price, total_amount, created_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                            (
+                                actual_id,
+                                str(tx["symbol"]).upper().strip(),
+                                str(tx.get("asset_type", "stock")),
+                                str(tx.get("asset_name", tx["symbol"])),
+                                str(tx.get("currency", "INR")),
+                                str(tx.get("trade_type", "BUY")).upper(),
+                                float(tx["quantity"]),
+                                float(tx.get("price", 0)),
+                                float(tx.get("total_amount", 0)),
+                                str(tx.get("created_at") or datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")),
+                            ),
+                        )
+
+            # Restore closed trades history
+            if closed_trades and isinstance(closed_trades, list):
+                for ct in closed_trades:
+                    if isinstance(ct, dict) and ct.get("symbol"):
+                        connection.execute(
+                            """INSERT OR IGNORE INTO closed_trades
+                            (user_id, symbol, asset_type, asset_name, currency, quantity, buy_price, sell_price, buy_time, sell_time, duration_seconds, duration_formatted, realized_pnl, realized_pnl_percent, created_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                            (
+                                actual_id,
+                                str(ct["symbol"]).upper().strip(),
+                                str(ct.get("asset_type", "stock")),
+                                str(ct.get("asset_name", ct["symbol"])),
+                                str(ct.get("currency", "INR")),
+                                float(ct.get("quantity", 0)),
+                                float(ct.get("buy_price", 0)),
+                                float(ct.get("sell_price", 0)),
+                                str(ct.get("buy_time") or datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")),
+                                str(ct.get("sell_time") or datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")),
+                                int(ct.get("duration_seconds", 0)),
+                                str(ct.get("duration_formatted", "0s")),
+                                float(ct.get("realized_pnl", 0)),
+                                float(ct.get("realized_pnl_percent", 0)),
+                                str(ct.get("created_at") or datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")),
+                            ),
+                        )
+
+            # Automatic Self-Healing: If user has 0 holdings, 0 closed trades, and 0 transactions in DB
+            # (which happens when ephemeral serverless container was destroyed without persisting holdings),
+            # but virtual balance was deducted, restore starting practice credits so no virtual money is lost.
+            p_count = connection.execute("SELECT COUNT(*) FROM portfolio WHERE user_id = ?", (actual_id,)).fetchone()[0]
+            c_count = connection.execute("SELECT COUNT(*) FROM closed_trades WHERE user_id = ?", (actual_id,)).fetchone()[0]
+            t_count = connection.execute("SELECT COUNT(*) FROM transactions WHERE user_id = ?", (actual_id,)).fetchone()[0]
+            if p_count == 0 and c_count == 0 and t_count == 0:
+                current_w = connection.execute("SELECT inr_balance, usdt_balance FROM wallet WHERE user_id = ?", (actual_id,)).fetchone()
+                if current_w:
+                    cur_inr = float(current_w["inr_balance"])
+                    cur_usdt = float(current_w["usdt_balance"])
+                    if cur_inr < STARTING_INR_BALANCE or cur_usdt < STARTING_USDT_BALANCE:
+                        connection.execute(
+                            "UPDATE wallet SET inr_balance = ?, usdt_balance = ?, cash_balance = ? WHERE user_id = ?",
+                            (STARTING_INR_BALANCE, STARTING_USDT_BALANCE, STARTING_INR_BALANCE, actual_id),
+                        )
+
             connection.commit()
             return actual_id
         except Exception as err:
             sys.stderr.write(f"Notice during restore_user_to_db: {err}\n")
             return None
+
+
+def reset_wallet(user_id):
+    """Reset a user's wallet back to the default starting virtual practice balances."""
+    with closing(get_connection()) as connection:
+        connection.execute(
+            """UPDATE wallet SET inr_balance = ?, usdt_balance = ?, cash_balance = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE user_id = ?""",
+            (STARTING_INR_BALANCE, STARTING_USDT_BALANCE, STARTING_INR_BALANCE, user_id),
+        )
+        connection.commit()
 
 
 def get_all_users():
