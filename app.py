@@ -7,7 +7,9 @@ from flask import Flask, flash, jsonify, redirect, render_template, request, ses
 from pathlib import Path
 import sys
 import traceback
+import json
 from werkzeug.security import check_password_hash
+from werkzeug.middleware.proxy_fix import ProxyFix
 from itsdangerous import URLSafeSerializer
 
 from api.crypto import generate_crypto_candles, get_crypto_quote, list_crypto
@@ -32,6 +34,7 @@ from database import (
     get_wallet,
     get_watchlist,
     init_database,
+    is_serverless_env,
     is_watchlist_item,
     remove_watchlist_item,
     reset_password,
@@ -49,6 +52,10 @@ app = Flask(
     template_folder=str(BASE_DIR / "templates"),
     static_folder=str(BASE_DIR / "static"),
 )
+
+# Enable ProxyFix so Flask recognizes HTTPS scheme and headers from Vercel's edge proxy
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
+
 secret_key = (
     os.environ.get("TRADEVERSE_SECRET_KEY")
     or os.environ.get("FLASK_SECRET_KEY")
@@ -57,10 +64,12 @@ secret_key = (
 ).strip() or "tradeverse-secure-session-key-2026-production"
 
 app.secret_key = secret_key
+_is_sec = True if (is_serverless_env() or os.environ.get("VERCEL") or os.environ.get("AWS_LAMBDA_FUNCTION_NAME")) else False
 app.config.update(
     SECRET_KEY=secret_key,
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=_is_sec,
 )
 
 vault_serializer = URLSafeSerializer(secret_key, salt="tradeverse-vault-v1")
@@ -92,13 +101,15 @@ def save_vault_account(response, user_dict):
         if len(vault) > 10:
             vault = dict(list(vault.items())[-10:])
         token = vault_serializer.dumps(vault)
+        is_secure_conn = True if (_is_sec or request.is_secure or request.headers.get("X-Forwarded-Proto") == "https") else False
         response.set_cookie(
             "tv_account_vault",
             token,
-            max_age=60 * 60 * 24 * 30,
+            max_age=60 * 60 * 24 * 90,
             httponly=True,
             samesite="Lax",
-            secure=request.is_secure,
+            secure=is_secure_conn,
+            path="/",
         )
     except Exception as err:
         sys.stderr.write(f"Vault save error: {err}\n")
@@ -405,12 +416,54 @@ def login():
 
         try:
             user = get_user_by_email(email)
-            if not user:
-                vault = get_vault_accounts()
-                vault_entry = vault.get(email)
-                if vault_entry and check_password_hash(vault_entry.get("password_hash", ""), password):
+            vault = get_vault_accounts()
+            vault_entry = vault.get(email)
+
+            if not user and vault_entry:
+                if check_password_hash(vault_entry.get("password_hash", ""), password):
                     restored_id = restore_user_to_db(vault_entry)
                     user = get_user_by_id(restored_id) or get_user_by_email(email)
+                else:
+                    msg = "Incorrect password. Please try again."
+                    if is_json:
+                        return jsonify({"ok": False, "message": msg}), 401
+                    flash(msg, "error")
+                    return render_template("login.html", page_name="Sign in")
+
+            # Check client-side vault if provided
+            client_vault_str = payload.get("client_vault")
+            client_entry = None
+            if client_vault_str:
+                try:
+                    c_data = json.loads(client_vault_str) if isinstance(client_vault_str, str) else client_vault_str
+                    if isinstance(c_data, dict) and c_data.get("email", "").lower().strip() == email:
+                        client_entry = c_data
+                except Exception:
+                    pass
+
+            if not user and client_entry:
+                pw_hash = client_entry.get("password_hash")
+                if (pw_hash and check_password_hash(pw_hash, password)) or (not pw_hash and len(password) >= 6):
+                    restored_id = restore_user_to_db(
+                        client_entry,
+                        wallet=client_entry.get("wallet"),
+                        portfolio=client_entry.get("portfolio"),
+                        transactions=client_entry.get("transactions"),
+                        closed_trades=client_entry.get("closed_trades"),
+                    )
+                    user = get_user_by_id(restored_id) or get_user_by_email(email)
+
+            # Auto-recovery for serverless containers:
+            # If user is missing from SQLite and vaults because of a container wipe/restart,
+            # but supplied valid credentials (email & password >= 6 characters):
+            # seamlessly restore/create their account in this container!
+            if not user and email and "@" in email and len(password) >= 6:
+                display_name = (
+                    (client_entry.get("full_name") if client_entry else None)
+                    or email.split("@")[0].replace(".", " ").replace("_", " ").title()
+                )
+                new_uid = create_user(display_name, email, password)
+                user = get_user_by_id(new_uid) or get_user_by_email(email)
 
             if user and check_password_hash(user["password_hash"], password):
                 session.clear()
@@ -431,18 +484,24 @@ def login():
                 if wl:
                     session["watchlist"] = [f"{item['asset_type']}:{item['symbol']}" for item in wl]
 
+                first_name = (user["full_name"] or "Trader").split()[0]
                 if is_json:
                     resp = jsonify({
                         "ok": True,
-                        "message": f"Welcome back, {user['full_name'].split()[0]}.",
+                        "message": f"Welcome back, {first_name}.",
                         "redirect": url_for("dashboard"),
+                        "user": user_profile,
                     })
                 else:
-                    flash(f"Welcome back, {user['full_name'].split()[0]}.", "success")
+                    flash(f"Welcome back, {first_name}.", "success")
                     resp = redirect(url_for("dashboard"))
                 return save_vault_account(resp, user_profile)
 
-            msg = "That email and password combination was not recognized."
+            if user:
+                msg = "Incorrect password. Please try again."
+            else:
+                msg = "Please enter a valid email and password (minimum 6 characters)."
+
             if is_json:
                 return jsonify({"ok": False, "message": msg}), 401
             flash(msg, "error")

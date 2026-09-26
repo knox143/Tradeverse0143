@@ -6,13 +6,52 @@
     <p class="eyebrow">Virtual markets. Real habits.</p>
     <h1>Practice the decisions before they matter.</h1>
     <p class="auth-copy">Trade stocks and crypto with a virtual wallet, then learn from every move.</p>
-    <form method="post" class="auth-form" novalidate>
+    <form method="post" class="auth-form" id="login-form" novalidate>
+        <input type="hidden" name="client_vault" id="client_vault">
         <label class="field-label" for="email">Email address</label>
         <input class="field-input" id="email" name="email" type="email" autocomplete="email" required autofocus>
         <div class="label-row"><label class="field-label" for="password">Password</label><a href="{{ url_for('forgot_password') }}">Forgot password?</a></div>
         <input class="field-input" id="password" name="password" type="password" autocomplete="current-password" required>
         <button class="primary-button full-button" type="submit"><i data-lucide="log-in"></i>Sign in</button>
     </form>
+    <script>
+        (function() {
+            var form = document.getElementById("login-form");
+            var emailInput = document.getElementById("email");
+            var vaultInput = document.getElementById("client_vault");
+            var lastEmail = localStorage.getItem("tv_last_email") || localStorage.getItem("tv_registered_email");
+            if (lastEmail && emailInput && !emailInput.value) {
+                emailInput.value = lastEmail;
+            }
+            if (form) {
+                form.addEventListener("submit", function() {
+                    var email = (emailInput.value || "").trim().toLowerCase();
+                    if (email) {
+                        localStorage.setItem("tv_last_email", email);
+                        var savedAccount = localStorage.getItem("tv_account_" + email);
+                        var savedPortfolio = localStorage.getItem("tv_portfolio_" + email);
+                        var savedWallet = localStorage.getItem("tv_wallet_" + email);
+                        var savedTx = localStorage.getItem("tv_transactions_" + email);
+                        var payload = {};
+                        if (savedAccount) {
+                            try { payload = JSON.parse(savedAccount); } catch(e) {}
+                        }
+                        payload.email = email;
+                        if (savedPortfolio) {
+                            try { payload.portfolio = JSON.parse(savedPortfolio); } catch(e) {}
+                        }
+                        if (savedWallet) {
+                            try { payload.wallet = JSON.parse(savedWallet); } catch(e) {}
+                        }
+                        if (savedTx) {
+                            try { payload.transactions = JSON.parse(savedTx); } catch(e) {}
+                        }
+                        vaultInput.value = JSON.stringify(payload);
+                    }
+                });
+            }
+        })();
+    </script>
     <p class="auth-switch">New to TradeVerse? <a href="{{ url_for('register') }}">Create your account</a></p>
 </section>
 <aside class="auth-aside" aria-label="TradeVerse preview">

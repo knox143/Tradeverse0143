@@ -186,14 +186,18 @@
             // Persist to client-side localStorage as backup against ephemeral serverless restarts
             try {
                 const uId = window.currentUserId || "active";
+                const uEmail = (window.currentUserEmail || "").toLowerCase().trim();
                 if (result.portfolio) {
                     localStorage.setItem(`tv_portfolio_${uId}`, JSON.stringify(result.portfolio));
+                    if (uEmail) localStorage.setItem(`tv_portfolio_${uEmail}`, JSON.stringify(result.portfolio));
                 }
                 if (result.wallet) {
                     localStorage.setItem(`tv_wallet_${uId}`, JSON.stringify(result.wallet));
+                    if (uEmail) localStorage.setItem(`tv_wallet_${uEmail}`, JSON.stringify(result.wallet));
                 }
                 if (result.transactions) {
                     localStorage.setItem(`tv_transactions_${uId}`, JSON.stringify(result.transactions));
+                    if (uEmail) localStorage.setItem(`tv_transactions_${uEmail}`, JSON.stringify(result.transactions));
                 }
             } catch (storageErr) {
                 console.warn("Storage backup notice:", storageErr);
@@ -641,11 +645,63 @@
         });
     }
 
-    /** Auto-sync holdings from client-side backup if server database woke up empty. */
-    async function checkAndSyncPortfolioBackup() {
+    /** Snapshot rendered portfolio holdings into client-side localStorage. */
+    function snapshotCurrentPortfolio() {
         if (!window.currentUserId) return;
         const uId = window.currentUserId;
-        const savedPortfolio = localStorage.getItem(`tv_portfolio_${uId}`);
+        const uEmail = (window.currentUserEmail || "").toLowerCase().trim();
+        const rows = document.querySelectorAll(".holdings-table tbody tr");
+        if (rows.length > 0) {
+            const holdings = [];
+            rows.forEach((tr) => {
+                const btn = tr.querySelector(".js-trade");
+                if (btn) {
+                    const symbol = btn.dataset.symbol;
+                    const name = btn.dataset.name;
+                    const assetType = btn.dataset.assetType;
+                    const currency = btn.dataset.currency;
+                    const qtyElem = tr.querySelector("td:nth-child(3)");
+                    const avgElem = tr.querySelector("td:nth-child(4)");
+                    const qty = qtyElem ? parseFloat(qtyElem.textContent.replace(/,/g, "")) : 0;
+                    const avg = avgElem ? parseFloat(avgElem.textContent.replace(/[^0-9.]/g, "")) : 0;
+                    if (symbol && qty > 0) {
+                        holdings.push({
+                            symbol: symbol,
+                            asset_name: name || symbol,
+                            asset_type: assetType || "stock",
+                            currency: currency || "INR",
+                            quantity: qty,
+                            average_price: avg,
+                        });
+                    }
+                }
+            });
+            if (holdings.length > 0) {
+                localStorage.setItem(`tv_portfolio_${uId}`, JSON.stringify(holdings));
+                if (uEmail) localStorage.setItem(`tv_portfolio_${uEmail}`, JSON.stringify(holdings));
+            }
+        }
+    }
+
+    /** Auto-sync holdings from client-side backup if server database woke up empty. */
+    async function checkAndSyncPortfolioBackup() {
+        if (!window.currentUserId && !window.currentUserEmail) return;
+        const uId = window.currentUserId;
+        const uEmail = (window.currentUserEmail || "").toLowerCase().trim();
+
+        // Cache identity in localStorage for future login auto-recovery
+        if (uEmail) {
+            localStorage.setItem("tv_last_email", uEmail);
+            const userSummaryElem = document.querySelector(".user-summary strong");
+            const fullName = userSummaryElem ? userSummaryElem.textContent.trim() : "";
+            localStorage.setItem(`tv_account_${uEmail}`, JSON.stringify({
+                id: uId,
+                email: uEmail,
+                full_name: fullName,
+            }));
+        }
+
+        const savedPortfolio = (uEmail ? localStorage.getItem(`tv_portfolio_${uEmail}`) : null) || (uId ? localStorage.getItem(`tv_portfolio_${uId}`) : null);
         if (!savedPortfolio) return;
 
         try {
@@ -654,8 +710,8 @@
                 const isPortfolioPage = document.querySelector(".portfolio-stats") !== null;
                 const hasNoHoldings = !document.querySelector(".holdings-table tbody tr");
                 if (isPortfolioPage && hasNoHoldings) {
-                    const savedWallet = localStorage.getItem(`tv_wallet_${uId}`);
-                    const savedTx = localStorage.getItem(`tv_transactions_${uId}`);
+                    const savedWallet = (uEmail ? localStorage.getItem(`tv_wallet_${uEmail}`) : null) || (uId ? localStorage.getItem(`tv_wallet_${uId}`) : null);
+                    const savedTx = (uEmail ? localStorage.getItem(`tv_transactions_${uEmail}`) : null) || (uId ? localStorage.getItem(`tv_transactions_${uId}`) : null);
                     const res = await fetch("/api/sync-state", {
                         method: "POST",
                         headers: { "Content-Type": "application/json", "Accept": "application/json" },
@@ -682,6 +738,7 @@
     function initializePage() {
         refreshIcons();
         checkAndSyncPortfolioBackup();
+        snapshotCurrentPortfolio();
         document.querySelectorAll(".js-trade").forEach((trigger) => trigger.addEventListener("click", () => openTradeDialog(trigger)));
         document.querySelectorAll(".js-watchlist").forEach((button) => button.addEventListener("click", () => toggleWatchlist(button)));
         document.querySelectorAll(".js-watchlist-remove").forEach((button) => button.addEventListener("click", () => removeWatchlistItem(button)));

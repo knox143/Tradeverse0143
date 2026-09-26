@@ -1,4 +1,4 @@
-﻿"""Ponytail runnable check: Verify serverless session restoration, vault cookies, and 401 API guards."""
+"""Ponytail runnable check: Verify serverless session restoration, vault cookies, and 401 API guards."""
 
 import sys
 from pathlib import Path
@@ -21,9 +21,14 @@ def run_checks():
     json_data = res.get_json()
     assert json_data and json_data.get("error") == "unauthorized", f"Invalid json: {json_data}"
 
-    # 2. Register account and verify vault cookie
+    # Clean up test user if previously left in DB
     email = "test_autocheck@example.com"
     pwd = "CheckPassword123"
+    with sqlite3.connect(str(get_database_path())) as conn:
+        conn.execute("DELETE FROM users WHERE email = ?", (email,))
+        conn.commit()
+
+    # 2. Register account and verify vault cookie
     res = client.post("/register", data={
         "full_name": "Autocheck User",
         "email": email,
@@ -58,9 +63,27 @@ def run_checks():
     assert res.headers["Location"] == "/dashboard"
     assert get_user_by_email(email) is not None, "User should be restored from vault cookie on login"
 
-    # Clean up test user
+    # 6. Test seamless container auto-recovery when client has NO cookies and DB was wiped (e.g. bkok382440@gmail.com scenario)
+    client.get("/logout")
+    fresh_client = app.test_client()  # brand new client with NO cookies
+    recovered_email = "bkok_simulated@gmail.com"
     with sqlite3.connect(str(get_database_path())) as conn:
-        conn.execute("DELETE FROM users WHERE email = ?", (email,))
+        conn.execute("DELETE FROM users WHERE email = ?", (recovered_email,))
+        conn.commit()
+
+    assert get_user_by_email(recovered_email) is None
+
+    # User arrives at /login, enters email and password on wiped container
+    res_rec = fresh_client.post("/login", data={"email": recovered_email, "password": "UserSecret123"}, follow_redirects=False)
+    assert res_rec.status_code == 302, f"Expected 302 on auto-recovery login, got {res_rec.status_code}"
+    assert res_rec.headers["Location"] == "/dashboard"
+    recovered_user = get_user_by_email(recovered_email)
+    assert recovered_user is not None, "User must be seamlessly restored/created on login without being locked out"
+    assert recovered_user["full_name"] == "Bkok Simulated"
+
+    # Clean up test users
+    with sqlite3.connect(str(get_database_path())) as conn:
+        conn.execute("DELETE FROM users WHERE email IN (?, ?)", (email, recovered_email))
         conn.commit()
 
     print("All serverless auth checks passed successfully.")

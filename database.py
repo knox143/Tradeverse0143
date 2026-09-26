@@ -695,15 +695,34 @@ def update_user_profile(user_id, full_name, email):
 
 
 def reset_password(email, new_password):
-    """Replace a password for the local demonstration reset flow."""
+    """Replace a password for the local demonstration reset flow, restoring user if container was wiped."""
+    clean_email = (email or "").lower().strip()
+    if not clean_email or "@" not in clean_email:
+        return False
     with closing(get_connection()) as connection:
         cursor = connection.execute(
             """UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP
             WHERE email = ?""",
-            (generate_password_hash(new_password), email.lower().strip()),
+            (generate_password_hash(new_password), clean_email),
         )
         connection.commit()
-        return cursor.rowcount > 0
+        if cursor.rowcount > 0:
+            return True
+        try:
+            display_name = clean_email.split("@")[0].replace(".", " ").title()
+            cursor2 = connection.execute(
+                "INSERT INTO users (full_name, email, password_hash) VALUES (?, ?, ?)",
+                (display_name, clean_email, generate_password_hash(new_password)),
+            )
+            new_uid = cursor2.lastrowid
+            connection.execute(
+                "INSERT INTO wallet (user_id, inr_balance, usdt_balance, cash_balance) VALUES (?, ?, ?, ?)",
+                (new_uid, STARTING_INR_BALANCE, STARTING_USDT_BALANCE, STARTING_INR_BALANCE),
+            )
+            connection.commit()
+            return True
+        except Exception:
+            return False
 
 
 def get_wallet(user_id):
