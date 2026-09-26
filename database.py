@@ -1,8 +1,17 @@
 """
 TradeVerse Database Bridge (database.py)
 ========================================
-Lightweight bridge delegating all database, auth, and trading queries
-directly to the unified engine.py module.
+[KYA HAI / WHAT IT IS]:
+Ye file TradeVerse ka lightweight database aur query facade bridge hai.
+
+[KIS LIYE HAI / PURPOSE]:
+1. Purane test scripts aur legacy modules ko backwards-compatibility provide karta hai.
+2. Sabhi database queries, authentication helpers aur trading functions ko seedhe
+   naya unified 'engine.py' module par delegate kar deta hai.
+
+[KAISE WORK KARTA HAI / HOW IT WORKS]:
+Engine.py se core functions (query_db, execute_trade, create_user, send_otp_email, etc.)
+ko import karke re-export karta hai. Isse circular import ka risk 0 ho jata hai.
 """
 
 from engine import (
@@ -32,6 +41,8 @@ from engine import (
     get_learning_modules,
     get_quiz_questions,
     score_quiz,
+    generate_otp,
+    send_otp_email,
 )
 
 def is_watchlist_item(user_id, symbol, asset_type):

@@ -20,6 +20,14 @@ from contextlib import contextmanager
 import requests
 from werkzeug.security import generate_password_hash, check_password_hash
 from markupsafe import Markup
+import secrets
+import smtplib
+import logging
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+
+# Engine logger initialization
+logger = logging.getLogger("tradeverse.engine")
 
 # ==============================================================================
 # SECTION 1: DATABASE POOL & CONCURRENT ACCESS (PostgreSQL + SQLite Fallback)
@@ -295,10 +303,112 @@ except Exception as e:
 
 # ==============================================================================
 # SECTION 2: USER AUTH & WALLET HELPERS
+# User account create karna, 4-digit OTP bhejna, wallet manage karna aur auth verify karna
 # ==============================================================================
-def create_user(full_name, email, password):
+def generate_otp():
+    """
+    [4-DIGIT SECURE OTP GENERATOR]
+    ---------------------------------------------------------
+    • Kya karta hai: 4-digit ka random numeric OTP banata hai (1000 se 9999).
+    • Kis liye hai: New user registration verify karne ke liye taaki fake accounts na banein.
+    • Return: String format mein 4-digit OTP jaise "4829".
+    """
+    return str(secrets.randbelow(9000) + 1000)
+
+
+def send_otp_email(to_email, otp, full_name="Trader"):
+    """
+    [4-DIGIT OTP EMAIL DISPATCHER]
+    ---------------------------------------------------------
+    • Kya karta hai: User ke Gmail / email par 4-digit verification code bhejta hai.
+    • Kis liye hai: Jab new user register karega to uske Gmail pe OTP jayega,
+      aur jab tak wo OTP verify nahi karega tab tak account create nahi hoga.
+    • Kaise kaam karta hai:
+      1. Environment variables (SMTP_USER, SMTP_PASS, SMTP_SERVER, SMTP_PORT) check karta hai.
+      2. Agar credentials available hain to secure TLS (Port 587) ke sath live HTML email bhejta hai.
+      3. Agar credentials abhi Vercel/.env mein set nahi hain to console/logger mein OTP print karta hai
+         aur dev_mode=True return karta hai taaki local testing bina rukawat ke turant ho sake.
+    """
+    smtp_server = os.environ.get("SMTP_SERVER", "smtp.gmail.com")
+    smtp_port = int(os.environ.get("SMTP_PORT", 587))
+    smtp_user = os.environ.get("SMTP_USER") or os.environ.get("SMTP_USERNAME")
+    smtp_pass = os.environ.get("SMTP_PASS") or os.environ.get("SMTP_PASSWORD")
+
+    subject = f"TradeVerse - Your 4-Digit Verification Code: {otp}"
+
+    html_content = f"""<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #0b0f17; color: #e2e8f0; margin: 0; padding: 20px; }}
+    .card {{ max-width: 500px; margin: 0 auto; background: #131b2a; border: 1px solid #1e293b; border-radius: 12px; padding: 32px; box-shadow: 0 8px 24px rgba(0,0,0,0.4); }}
+    .logo {{ font-size: 24px; font-weight: 800; color: #38bdf8; margin-bottom: 16px; letter-spacing: -0.5px; }}
+    .logo span {{ color: #818cf8; }}
+    h2 {{ font-size: 20px; font-weight: 700; color: #f8fafc; margin-top: 0; }}
+    p {{ font-size: 14px; line-height: 1.6; color: #94a3b8; }}
+    .otp-box {{ background: #1e293b; border: 2px dashed #38bdf8; border-radius: 8px; text-align: center; padding: 18px; margin: 24px 0; }}
+    .otp-code {{ font-size: 38px; font-weight: 900; letter-spacing: 12px; color: #38bdf8; font-family: monospace; }}
+    .meta {{ font-size: 12px; color: #64748b; margin-top: 24px; border-top: 1px solid #1e293b; padding-top: 16px; }}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">Trade<span>Verse</span></div>
+    <h2>Verify Your Email / ईमेल वेरीफाई करें</h2>
+    <p>Hi {full_name},</p>
+    <p>TradeVerse practice trading space mein aapka swagat hai. Apna account activate karne aur <strong>₹10,00,000 INR & 10,000 USDT</strong> virtual practice credits pane ke liye neeche diya gaya 4-digit code enter karein:</p>
+    <div class="otp-box">
+      <div class="otp-code">{otp}</div>
+    </div>
+    <p>Ye verification code <strong>10 minutes</strong> tak valid rahega. Agar aapne ye request nahi ki thi, to aap is email ko ignore kar sakte hain.</p>
+    <div class="meta">
+      TradeVerse Virtual Trading &bull; Strictly Paper Trading (No Real Money).
+    </div>
+  </div>
+</body>
+</html>"""
+
+    if smtp_user and smtp_pass:
+        try:
+            msg = MIMEMultipart("alternative")
+            msg["Subject"] = subject
+            msg["From"] = f"TradeVerse <{smtp_user}>"
+            msg["To"] = to_email
+
+            text_part = MIMEText(f"Your TradeVerse verification code is: {otp}\nValid for 10 minutes.", "plain")
+            html_part = MIMEText(html_content, "html")
+            msg.attach(text_part)
+            msg.attach(html_part)
+
+            with smtplib.SMTP(smtp_server, smtp_port, timeout=10) as server:
+                server.starttls()
+                server.login(smtp_user, smtp_pass)
+                server.send_message(msg)
+            return {"sent": True, "dev_mode": False}
+        except Exception as e:
+            logger.warning(f"SMTP send failed: {e}. Falling back to dev mode OTP.")
+            return {"sent": True, "dev_mode": True, "otp": otp, "error": str(e)}
+    else:
+        logger.info(f"[TradeVerse OTP] Verification code for {to_email}: {otp}")
+        return {"sent": True, "dev_mode": True, "otp": otp}
+
+
+def create_user(full_name, email, password, is_hashed=False):
+    """
+    [NEW USER CREATION IN DATABASE]
+    ---------------------------------------------------------
+    • Kya karta hai: Naye user ko database (Postgres ya SQLite) mein save karta hai.
+    • Wallet funding: User ke bante hi ₹10,00,000 INR aur 10,000 USDT virtual balance auto-credit hota hai.
+    • Arguments:
+      - full_name: User ka pura naam
+      - email: User ka verified Gmail / email
+      - password: Raw password string ya pre-computed password hash
+      - is_hashed: Agar True ho to password ko dobara hash nahi karta
+    • Return: Naye user ki database ID (uid)
+    """
     email = email.lower().strip()
-    h = generate_password_hash(password)
+    h = password if is_hashed else generate_password_hash(password)
     existing = query_db("SELECT id FROM users WHERE email = %s", (email,), fetchone=True)
     if existing:
         raise ValueError("An account already exists for that email address.")
