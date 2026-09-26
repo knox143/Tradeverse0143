@@ -1,6 +1,8 @@
-# Runtime dependencies for TradeVerse deployment on Vercel
+# Runtime dependencies for TradeVerse deployment
 Flask>=3.0.0,<4.0.0
 requests>=2.31.0
 werkzeug>=3.0.0
 markupsafe>=2.1.0
 itsdangerous>=2.1.0
+psycopg2-binary>=2.9.9
+gunicorn>=21.2.0

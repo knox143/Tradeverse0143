@@ -1,0 +1,218 @@
+<!-- Unified Trade Template for Stocks and Crypto -->
+{% extends 'base.html' %}
+{% block content %}
+<section class="market-page-intro">
+    <div>
+        <p class="eyebrow">{% if active_tab == 'crypto' %}Digital assets &bull; USDT{% else %}Equities market &bull; Dual Currency (₹ INR & USDT){% endif %}</p>
+        <h2>{% if active_tab == 'crypto' %}Crypto Market & Chart Studio{% else %}Indian & Global Stocks Studio{% endif %}</h2>
+        <p>{% if active_tab == 'crypto' %}Live real-time crypto prices in USDT. Quotes from Binance & CoinGecko feeds.{% else %}Indian Stock Market (NSE in ₹ INR) and Global Equities (USDT). Quotes powered by free tier feeds with 10–15m exchange delay.{% endif %}</p>
+    </div>
+    <span class="data-label" title="Quotes from free exchange feeds (10–15 minutes delayed)"><i data-lucide="clock"></i>Free Tier Feed &bull; 10–15m Delayed</span>
+</section>
+
+<!-- Market Switcher Tabs -->
+<div class="dash-chart-tabs" style="margin-bottom: 24px;">
+    <a href="{{ url_for('stocks') }}" class="dash-chart-tab {% if active_tab != 'crypto' %}is-active{% endif %}">
+        <i data-lucide="landmark"></i>Stocks (NSE & US)
+    </a>
+    <a href="{{ url_for('crypto') }}" class="dash-chart-tab {% if active_tab == 'crypto' %}is-active{% endif %}">
+        <i data-lucide="bitcoin"></i>Crypto Market
+    </a>
+</div>
+
+{% if active_tab == 'crypto' %}
+<!-- Coin Chart Studio -->
+<section class="chart-studio-section" id="crypto-chart-studio">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Technical Analysis</p>
+            <h2>Coin Candlestick Studio</h2>
+            <p>Select any cryptocurrency below to inspect its real-time candlestick chart powered by Binance.</p>
+        </div>
+        <div class="chart-legend">
+            <span><i class="legend-win"></i>Bullish Candle</span>
+            <span style="margin-left:8px;"><i class="legend-loss"></i>Bearish Candle</span>
+        </div>
+    </div>
+
+    <div class="chart-asset-selector" id="crypto-chart-pills">
+        {% for c in items %}
+        <button type="button" class="asset-pill {% if loop.first %}is-active{% endif %}" data-studio-select data-symbol="{{ c.symbol }}" data-name="{{ c.name }}" data-asset-type="crypto" data-currency="USDT" data-price="{{ c.price }}">
+            <span class="pill-icon">{{ c.symbol|asset_icon('crypto', 24) }}</span>
+            <span><strong>{{ c.symbol }}</strong><small>{{ c.name }} &bull; USDT</small></span>
+        </button>
+        {% endfor %}
+    </div>
+
+    <div class="studio-chart-card">
+        <div class="studio-chart-header">
+            <div class="studio-header-left">
+                <span id="crypto-studio-icon" class="modal-icon-wrap">{{ (items[0].symbol if items else 'BTC')|asset_icon('crypto', 36) }}</span>
+                <div>
+                    <h3 id="crypto-studio-title">{{ items[0].name if items else 'Bitcoin' }} ({{ items[0].symbol if items else 'BTC' }})</h3>
+                    <p class="studio-subtext">Real-Time Binance Klines &bull; USDT Pair</p>
+                </div>
+            </div>
+            <div class="studio-header-right">
+                <div class="timeframe-selector" id="crypto-timeframe-selector">
+                    <button type="button" class="tf-pill" data-timeframe="1m">1M</button>
+                    <button type="button" class="tf-pill" data-timeframe="5m">5M</button>
+                    <button type="button" class="tf-pill" data-timeframe="15m">15M</button>
+                    <button type="button" class="tf-pill" data-timeframe="1h">1H</button>
+                    <button type="button" class="tf-pill is-active" data-timeframe="5y">Daily</button>
+                </div>
+                <div class="studio-badge-group">
+                    <span id="crypto-studio-pair" class="currency-pill usdt">{{ items[0].symbol if items else 'BTC' }}/USDT</span>
+                    <span id="crypto-studio-price" class="studio-live-price">{{ items[0].price if items else '0.00' }} USDT</span>
+                </div>
+                <button type="button" class="primary-button js-trade" id="crypto-studio-trade-btn"
+                    data-symbol="{{ items[0].symbol if items else 'BTC' }}"
+                    data-name="{{ items[0].name if items else 'Bitcoin' }}"
+                    data-price="{{ items[0].price if items else '0.00' }}"
+                    data-currency="USDT"
+                    data-asset-type="crypto">
+                    <i data-lucide="arrow-up-right"></i>Trade {{ items[0].symbol if items else 'BTC' }}
+                </button>
+            </div>
+        </div>
+        <div class="studio-chart-canvas-wrap">
+            <div id="crypto-studio-canvas" class="studio-chart-canvas" data-timeframe="5y"></div>
+        </div>
+    </div>
+</section>
+
+{% else %}
+<!-- Stock Chart Studio -->
+<section class="chart-studio-section" id="stock-chart-studio">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Technical Analysis</p>
+            <h2>Stock Candlestick Studio</h2>
+            <p>Inspect real-time daily candlestick patterns for Indian NSE stocks (INR) and US/Global equities (USDT).</p>
+        </div>
+        <div class="chart-legend">
+            <span><i class="legend-win"></i>Bullish Candle</span>
+            <span style="margin-left:8px;"><i class="legend-loss"></i>Bearish Candle</span>
+        </div>
+    </div>
+
+    <div class="chart-asset-selector" id="stock-chart-pills">
+        {% for s in items %}
+        <button type="button" class="asset-pill {% if loop.first %}is-active{% endif %}" data-studio-select data-symbol="{{ s.symbol }}" data-name="{{ s.name }}" data-asset-type="stock" data-currency="{{ s.currency }}" data-price="{{ s.price }}">
+            <span class="pill-icon">{{ s.symbol|asset_icon('stock', 24) }}</span>
+            <span><strong>{{ s.symbol.split('.')[0] }}</strong><small>{{ s.market }} &bull; {{ s.currency }}</small></span>
+        </button>
+        {% endfor %}
+    </div>
+
+    <div class="studio-chart-card">
+        <div class="studio-chart-header">
+            <div class="studio-header-left">
+                <span id="stock-studio-icon" class="modal-icon-wrap">{{ (items[0].symbol if items else 'RELIANCE.NS')|asset_icon('stock', 36) }}</span>
+                <div>
+                    <h3 id="stock-studio-title">{{ items[0].name if items else 'Reliance Industries' }} ({{ items[0].symbol if items else 'RELIANCE.NS' }})</h3>
+                    <p id="stock-studio-subtitle" class="studio-subtext">{% if items and items[0].currency == 'INR' %}Indian NSE &bull; Live Daily Candlesticks{% else %}Global Equities &bull; Live Daily Candlesticks{% endif %}</p>
+                </div>
+            </div>
+            <div class="studio-header-right">
+                <div class="studio-badge-group">
+                    <span id="stock-studio-currency" class="currency-pill {{ (items[0].currency|lower) if items else 'inr' }}">{{ items[0].currency if items else 'INR' }}</span>
+                    <span id="stock-studio-price" class="studio-live-price">{% if items and items[0].currency == 'INR' %}₹{% endif %}{{ items[0].price if items else '0.00' }}{% if items and items[0].currency == 'USDT' %} USDT{% endif %}</span>
+                </div>
+                <button type="button" class="primary-button js-trade" id="stock-studio-trade-btn"
+                    data-symbol="{{ items[0].symbol if items else 'RELIANCE.NS' }}"
+                    data-name="{{ items[0].name if items else 'Reliance Industries' }}"
+                    data-price="{{ items[0].price if items else '0.00' }}"
+                    data-currency="{{ items[0].currency if items else 'INR' }}"
+                    data-asset-type="stock">
+                    <i data-lucide="arrow-up-right"></i>Trade {{ (items[0].symbol.split('.')[0]) if items else 'RELIANCE' }}
+                </button>
+            </div>
+        </div>
+        <div class="studio-chart-canvas-wrap">
+            <div id="stock-studio-canvas" class="studio-chart-canvas" data-timeframe="1y"></div>
+        </div>
+    </div>
+</section>
+{% endif %}
+
+<!-- Market Assets Table -->
+<section class="market-table-section">
+    <div class="table-search-row">
+        <form method="get" class="search-form">
+            <input type="text" name="q" value="{{ query }}" placeholder="Search {{ 'crypto coins' if active_tab == 'crypto' else 'stocks by ticker or name' }}..." class="field-input search-input">
+            {% if active_tab != 'crypto' %}
+            <select name="market" class="field-input filter-select" onchange="this.form.submit()">
+                <option value="All" {% if selected_market == 'All' %}selected{% endif %}>All Markets</option>
+                <option value="India" {% if selected_market == 'India' %}selected{% endif %}>India (NSE / INR)</option>
+                <option value="Global" {% if selected_market == 'Global' %}selected{% endif %}>Global (US / USDT)</option>
+            </select>
+            {% endif %}
+            <button type="submit" class="secondary-button"><i data-lucide="search"></i>Search</button>
+        </form>
+    </div>
+
+    <div class="table-responsive">
+        <table class="market-table">
+            <thead>
+                <tr>
+                    <th>Asset</th>
+                    <th>Price</th>
+                    <th>24h Change</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in items %}
+                <tr>
+                    <td>
+                        <div class="asset-cell">
+                            <span class="table-logo">{{ item.symbol|asset_icon(active_tab, 28) }}</span>
+                            <div>
+                                <strong>{{ item.name }}</strong>
+                                <span class="asset-symbol-tag">{{ item.symbol }}</span>
+                            </div>
+                        </div>
+                    </td>
+                    <td>
+                        <strong>{% if item.currency == 'INR' %}₹{% endif %}{{ item.price|currency_format(item.currency) }}</strong>
+                        <span class="currency-pill {{ item.currency|lower }}">{{ item.currency }}</span>
+                    </td>
+                    <td>
+                        <span class="pnl-pill {% if item.change >= 0 %}is-positive{% else %}is-negative{% endif %}">
+                            {{ '+' if item.change > 0 else '' }}{{ item.change }}%
+                        </span>
+                    </td>
+                    <td>
+                        <div class="action-buttons">
+                            <button type="button" class="small-button js-view-chart"
+                                data-symbol="{{ item.symbol }}"
+                                data-name="{{ item.name }}"
+                                data-price="{{ item.price }}"
+                                data-currency="{{ item.currency }}"
+                                data-asset-type="{{ active_tab }}">
+                                <i data-lucide="line-chart"></i>Chart
+                            </button>
+                            <button type="button" class="small-button js-watchlist {% if item.symbol in saved_symbols %}is-saved{% endif %}"
+                                data-symbol="{{ item.symbol }}"
+                                data-asset-type="{{ active_tab }}">
+                                <i data-lucide="star"></i>
+                            </button>
+                            <button type="button" class="small-button primary-button js-trade"
+                                data-symbol="{{ item.symbol }}"
+                                data-name="{{ item.name }}"
+                                data-price="{{ item.price }}"
+                                data-currency="{{ item.currency }}"
+                                data-asset-type="{{ active_tab }}"
+                                data-order-side="BUY">
+                                Trade
+                            </button>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}

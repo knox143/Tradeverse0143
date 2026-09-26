@@ -58,10 +58,26 @@
                 <div class="market-status" title="Market quotes are provided by free tier exchange feeds (10–15 minutes delayed)"><span class="status-dot"></span><span>Practice Market</span><span class="market-delay-badge"><i data-lucide="clock"></i>10–15m Delayed</span></div>
             </header>
             <main class="page-content">
-                {% include '_flash_messages.html' %}
+                {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+        <div class="flash-messages">
+            {% for category, message in messages %}
+            <div class="flash-message flash-{{ category }}">{{ message }}</div>
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% endwith %}
     {% else %}
     <main class="auth-layout">
-        {% include '_flash_messages.html' %}
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+        <div class="flash-messages">
+            {% for category, message in messages %}
+            <div class="flash-message flash-{{ category }}">{{ message }}</div>
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% endwith %}
     {% endif %}
     {% block content %}{% endblock %}
     {% if current_user %}

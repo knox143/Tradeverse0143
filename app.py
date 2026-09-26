@@ -1,1057 +1,627 @@
 """
-TradeVerse - Main Application Server (Flask)
-========================================================================================
-Yeh file TradeVerse application ka main backend controller hai.
-Isme routing, user authentication, virtual trading execution, serverless auto-recovery,
-aur real-time market API endpoints handle hote hain.
-========================================================================================
+TradeVerse Application Controller (app.py)
+===========================================
+Streamlined, production-ready Flask application powered by engine.py.
+Handles authentication, market data routing, atomic trade execution, and serverless resilience.
 """
 
-import json
 import os
-from functools import wraps
-from pathlib import Path
-import sys
-import traceback
-
-from flask import Flask, flash, jsonify, redirect, render_template, request, session, url_for
-from itsdangerous import URLSafeSerializer
+import json
+from datetime import datetime, timedelta
+from flask import (
+    Flask, render_template, request, redirect, url_for,
+    flash, session, jsonify, make_response
+)
+from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.middleware.proxy_fix import ProxyFix
-from werkzeug.security import check_password_hash
+from markupsafe import Markup
 
-# --- External Market Data Services (Crypto, Stocks, Icons, Portfolio Math) ---
-from api.crypto import generate_crypto_candles, get_crypto_quote, list_crypto
-from api.icons import get_asset_svg, get_market_pair
-from api.portfolio import calculate_leaderboard, calculate_portfolio
-from api.stocks import generate_candles, get_stock_quote, list_stocks
+import engine
 
-# --- SQLite Database Helper Functions (Users, Orders, Wallets, Learning) ---
-from database import (
-    STARTING_INR_BALANCE,
-    STARTING_USDT_BALANCE,
-    add_watchlist_item,
-    create_user,
-    execute_trade,
-    get_closed_trades,
-    get_learning_modules,
-    get_portfolio_rows,
-    get_quiz_questions,
-    get_quiz_results,
-    get_transactions,
-    get_user_by_email,
-    get_user_by_id,
-    get_wallet,
-    get_watchlist,
-    init_database,
-    is_serverless_env,
-    is_watchlist_item,
-    remove_watchlist_item,
-    reset_password,
-    reset_wallet,
-    restore_user_to_db,
-    score_quiz,
-    toggle_watchlist_item,
-    update_user_profile,
-)
+# Initialize Flask application
+app = Flask(__name__)
+app.secret_key = os.environ.get("FLASK_SECRET_KEY") or os.environ.get("TRADEVERSE_SECRET_KEY") or "tradeverse-secret-key-3.0"
 
-# ==============================================================================
-# SECTION 1: FLASK APP & PROXY SETUP (Server Configuration)
-# Vercel reverse proxy ke piche HTTPS headers accurately detect karne ke liye ProxyFix.
-# ==============================================================================
-BASE_DIR = Path(__file__).resolve().parent
-app = Flask(
-    __name__,
-    template_folder=str(BASE_DIR / "templates"),
-    static_folder=str(BASE_DIR / "static"),
-)
-
-# ProxyFix: Ensures request.is_secure is True on Vercel HTTPS
-app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
-
-secret_key = (
-    os.environ.get("TRADEVERSE_SECRET_KEY")
-    or os.environ.get("FLASK_SECRET_KEY")
-    or os.environ.get("SECRET_KEY")
-    or ""
-).strip() or "tradeverse-secure-session-key-2026-production"
-
-app.secret_key = secret_key
-_is_sec = True if (is_serverless_env() or os.environ.get("VERCEL") or os.environ.get("AWS_LAMBDA_FUNCTION_NAME")) else False
+# Production cookie configuration
 app.config.update(
-    SECRET_KEY=secret_key,
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
-    SESSION_COOKIE_SECURE=_is_sec,
+    SESSION_COOKIE_SECURE=bool(os.environ.get("VERCEL")),
+    PERMANENT_SESSION_LIFETIME=timedelta(days=30),
 )
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 
-# ==============================================================================
-# SECTION 2: SERVERLESS PERSISTENCE & COOKIE VAULT
-# Vercel serverless containers restart hone par SQLite DB wipe ho jata hai.
-# Yeh system cookie vault aur session se user account, wallet, aur portfolio ko
-# naye container ke SQLite me automatically restore karta hai taaki data kabhi loss na ho.
-# ==============================================================================
-vault_serializer = URLSafeSerializer(secret_key, salt="tradeverse-vault-v1")
-
-
-def get_vault_accounts():
-    """Client ke signed persistent cookie ('tv_account_vault') se accounts retrieve karta hai."""
-    token = request.cookies.get("tv_account_vault")
-    if not token:
-        return {}
-    try:
-        data = vault_serializer.loads(token)
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
-
-
-def save_vault_account(response, user_dict):
-    """User profile ko 90 dino ke liye secure browser cookie me encrypt karke save karta hai."""
-    try:
-        vault = get_vault_accounts()
-        email = str(user_dict["email"]).lower().strip()
-        vault[email] = {
-            "id": user_dict.get("id"),
-            "full_name": user_dict.get("full_name"),
-            "email": email,
-            "password_hash": user_dict.get("password_hash"),
-        }
-        if len(vault) > 10:
-            vault = dict(list(vault.items())[-10:])
-        token = vault_serializer.dumps(vault)
-        is_secure_conn = True if (_is_sec or request.is_secure or request.headers.get("X-Forwarded-Proto") == "https") else False
-        response.set_cookie(
-            "tv_account_vault",
-            token,
-            max_age=60 * 60 * 24 * 90,
-            httponly=True,
-            samesite="Lax",
-            secure=is_secure_conn,
-            path="/",
-        )
-    except Exception as err:
-        sys.stderr.write(f"Vault save error: {err}\n")
-    return response
-
-
-@app.before_request
-def ensure_session_user_in_db():
-    """Har request se pehle check karta hai ki user local container DB me maujood hai ya nahi.
-    Agar naya container spawn hua ho toh session/vault se user aur holdings ko auto-restore karta hai."""
-    profile = session.get("user_profile")
-    if profile and isinstance(profile, dict):
-        user_id = profile.get("id") or session.get("user_id")
-        user = get_user_by_id(user_id) if user_id else None
-        if not user:
-            restored_id = restore_user_to_db(
-                profile,
-                wallet=session.get("user_wallet"),
-                watchlist=session.get("watchlist"),
-                portfolio=session.get("user_portfolio"),
-                transactions=session.get("user_transactions"),
-                closed_trades=session.get("user_closed_trades"),
-            )
-            if restored_id:
-                session["user_id"] = restored_id
-                session["user_profile"]["id"] = restored_id
-        else:
-            # Agar user DB me hai par holdings table empty hai aur session me holdings hain toh restore karo
-            session_portfolio = session.get("user_portfolio")
-            if session_portfolio and isinstance(session_portfolio, list) and len(session_portfolio) > 0:
-                db_holdings = get_portfolio_rows(user_id)
-                if not db_holdings or len(db_holdings) == 0:
-                    restore_user_to_db(
-                        profile,
-                        wallet=session.get("user_wallet"),
-                        watchlist=session.get("watchlist"),
-                        portfolio=session_portfolio,
-                        transactions=session.get("user_transactions"),
-                        closed_trades=session.get("user_closed_trades"),
-                    )
-
-
-try:
-    init_database()
-except Exception as err:
-    sys.stderr.write(f"Notice: init_database caught exception on start: {err}\n")
-
-
-def login_required(view_function):
-    """Redirect unauthenticated visitors or return JSON 401 for API/AJAX requests."""
-    @wraps(view_function)
-    def wrapped_view(*args, **kwargs):
-        user_id = session.get("user_id")
-        user = get_user_by_id(user_id) if user_id else None
-        if not user:
-            profile = session.get("user_profile")
-            if profile and isinstance(profile, dict):
-                restored_id = restore_user_to_db(
-                    profile,
-                    wallet=session.get("user_wallet"),
-                    watchlist=session.get("watchlist"),
-                    portfolio=session.get("user_portfolio"),
-                    transactions=session.get("user_transactions"),
-                    closed_trades=session.get("user_closed_trades"),
-                )
-                if restored_id:
-                    session["user_id"] = restored_id
-                    user = get_user_by_id(restored_id)
-
-        if not user:
-            session.clear()
-            is_api = (
-                request.path.startswith("/api/")
-                or request.path == "/trade"
-                or request.path == "/watchlist/toggle"
-                or request.is_json
-                or "application/json" in request.headers.get("Accept", "")
-                or request.headers.get("X-Requested-With") == "XMLHttpRequest"
-            )
-            if is_api:
-                return jsonify({"ok": False, "error": "unauthorized", "message": "Please sign in to continue."}), 401
-            flash("Please sign in to use TradeVerse.", "warning")
-            return redirect(url_for("login"))
-        return view_function(*args, **kwargs)
-    return wrapped_view
-
-
-def quote_for_asset(symbol, asset_type):
-    """Resolve one symbol from the correct provider service module."""
-    if asset_type == "crypto":
-        return get_crypto_quote(symbol)
-    return get_stock_quote(symbol)
-
-
-def row_to_quote(row):
-    """Convert a watchlist database row into a quote with a graceful fallback."""
-    quote = quote_for_asset(row["symbol"], row["asset_type"])
-    if quote:
-        price = float(quote["price"])
-        percentage_change = float(quote.get("change", 0))
-        previous_price = price / (1 + percentage_change / 100) if percentage_change != -100 else price
-        currency = quote.get("currency") or ("INR" if row["asset_type"] == "stock" and (quote.get("market") == "India" or row["symbol"].endswith(".NS") or row["symbol"].endswith(".BO")) else "USDT")
-        return {
-            **quote,
-            "currency": currency,
-            "asset_type": row["asset_type"],
-            "market_type": "Crypto" if row["asset_type"] == "crypto" else quote.get("market", "Stocks"),
-            "price_change": price - previous_price,
-            "added_at": row["created_at"],
-        }
-    currency = "INR" if row["asset_type"] == "stock" and (row["symbol"].endswith(".NS") or row["symbol"].endswith(".BO")) else "USDT"
-    return {
-        "symbol": row["symbol"],
-        "name": row["symbol"],
-        "price": 0,
-        "change": 0,
-        "currency": currency,
-        "asset_type": row["asset_type"],
-        "market_type": "Crypto" if row["asset_type"] == "crypto" else "Stocks",
-        "price_change": 0,
-        "added_at": row["created_at"],
-    }
-
-
-def latest_market_quotes():
-    """Return the local dashboard market list for gainers and losers panels."""
-    stocks = [{**stock, "asset_type": "stock", "currency": stock.get("currency", "INR" if stock.get("market") == "India" else "USDT")} for stock in list_stocks()]
-    crypto = [{**coin, "asset_type": "crypto", "currency": "USDT"} for coin in list_crypto()]
-    return stocks + crypto
+VAULT_COOKIE_NAME = "tv_account_vault"
 
 
 # ==============================================================================
-# SECTION 3: TEMPLATE FILTERS & CONTEXT HELPERS
-# UI rendering me currency formats (INR ₹, USDT), P/L positive/negative color tags,
-# live SVG vector logos aur layout global data inject karne ke filters.
+# JINJA2 CUSTOM FILTERS
 # ==============================================================================
-@app.context_processor
-def inject_layout_data():
-    """Har Jinja template ko current user, wallet balance, aur watchlist provide karta hai."""
-    user = get_user_by_id(session["user_id"]) if "user_id" in session else None
-    watchlist_keys = set()
-    wallet = {"inr": 0.0, "usdt": 0.0}
-    if user:
-        watchlist_keys = {
-            f"{item['asset_type']}:{item['symbol']}" for item in get_watchlist(user["id"])
-        }
-        wallet = get_wallet(user["id"])
-    return {"current_user": user, "wallet": wallet, "watchlist_keys": watchlist_keys}
-
-
-@app.template_filter("credits")
-def format_credits(value, currency=None):
-    """Format currency values with INR or USDT symbols."""
-    val = float(value or 0)
-    if currency == "INR":
-        return f"₹{val:,.2f}"
-    if currency == "USDT":
-        return f"{val:,.2f} USDT"
-    # Sensible default if no currency passed
-    return f"₹{val:,.2f}"
-
-
 @app.template_filter("inr")
-def format_inr(value):
-    """Format Indian Rupee amount."""
-    val = float(value or 0)
-    return f"₹{val:,.2f}"
-
+def filter_inr(val):
+    try:
+        return f"₹{float(val or 0.0):,.2f}"
+    except Exception:
+        return "₹0.00"
 
 @app.template_filter("usdt")
-def format_usdt(value):
-    """Format USDT amount."""
-    val = float(value or 0)
-    return f"{val:,.2f} USDT"
-
-
-@app.template_filter("currency_val")
-def format_currency_val(value, currency="INR"):
-    """Format amount based on explicit currency tag."""
-    val = float(value or 0)
-    if str(currency).upper() == "INR":
-        return f"₹{val:,.2f}"
-    return f"{val:,.2f} USDT"
-
-
-@app.template_filter("signed_currency")
-def format_signed_currency(value, currency="INR"):
-    """Format signed amount with explicit currency symbol."""
-    val = float(value or 0)
-    sign = "+" if val >= 0 else "-"
-    abs_val = abs(val)
-    if str(currency).upper() == "INR":
-        return f"{sign}₹{abs_val:,.2f}"
-    return f"{sign}{abs_val:,.2f} USDT"
-
-
-@app.template_filter("quantity")
-def format_quantity(value):
-    """Show share and coin quantities without distracting trailing zeroes."""
-    return f"{float(value):,.4f}".rstrip("0").rstrip(".")
-
+def filter_usdt(val):
+    try:
+        return f"{float(val or 0.0):,.2f} USDT"
+    except Exception:
+        return "0.00 USDT"
 
 @app.template_filter("signed")
-def format_signed(value):
-    """Format a percentage or price change with an explicit plus or minus sign."""
-    numeric_value = float(value)
-    return f"{numeric_value:+.2f}"
+def filter_signed(val):
+    try:
+        num = float(val or 0.0)
+        return f"+{num:.2f}" if num > 0 else f"{num:.2f}"
+    except Exception:
+        return "0.00"
 
+@app.template_filter("signed_currency")
+def filter_signed_currency(val, currency="INR"):
+    try:
+        num = float(val or 0.0)
+        sign = "+" if num > 0 else ("-" if num < 0 else "")
+        abs_v = f"{abs(num):,.2f}"
+        return f"{sign}₹{abs_v}" if currency == "INR" else f"{sign}{abs_v} USDT"
+    except Exception:
+        return "0.00"
 
-@app.template_filter("asset_icon")
-def filter_asset_icon(symbol, asset_type="stock", size=32):
-    """Return crisp SVG vector icon for any crypto coin or stock."""
-    return get_asset_svg(symbol, asset_type, size)
-
+@app.template_filter("currency_format")
+def filter_currency_format(val, currency="INR"):
+    try:
+        num = float(val or 0.0)
+        dec = 4 if num < 1 and currency == "USDT" else 2
+        return f"{num:,.{dec}f}"
+    except Exception:
+        return "0.00"
 
 @app.template_filter("market_pair")
 def filter_market_pair(symbol, currency=""):
-    """Format trading pair symbol (e.g. BTC/USDT, RELIANCE/INR)."""
-    return get_market_pair(symbol, currency)
+    cur = currency or ("INR" if str(symbol).endswith(".NS") or str(symbol).endswith(".BO") else "USDT")
+    clean = str(symbol).split(".")[0].upper()
+    return f"{clean}/{cur}"
+
+@app.template_filter("credits")
+def filter_credits(value, currency="INR"):
+    val = float(value or 0)
+    return f"₹{val:,.2f}" if currency == "INR" else f"{val:,.2f} USDT"
+
+@app.template_filter("currency_val")
+def filter_currency_val(value, currency="INR"):
+    val = float(value or 0)
+    return f"₹{val:,.2f}" if str(currency).upper() == "INR" else f"{val:,.2f} USDT"
+
+@app.template_filter("quantity")
+def filter_quantity(value):
+    try:
+        return f"{float(value):,.4f}".rstrip("0").rstrip(".")
+    except Exception:
+        return str(value)
+
+@app.template_filter("asset_icon")
+def filter_asset_icon(symbol, asset_type="stock", size=24):
+    return engine.get_asset_icon_svg(asset_type, symbol, size=size)
+
+@app.template_filter("format_duration")
+def filter_format_duration(seconds):
+    return engine.format_duration(seconds or 0)
 
 
-app.jinja_env.globals["asset_icon"] = get_asset_svg
-app.jinja_env.globals["market_pair"] = get_market_pair
+# ==============================================================================
+# AUTHENTICATION VAULT & CONTEXT HELPERS
+# ==============================================================================
+def save_vault_cookie(response, user_id, email, full_name, password_hash=""):
+    payload = json.dumps({
+        "id": user_id,
+        "email": email,
+        "full_name": full_name,
+        "password_hash": password_hash,
+    })
+    response.set_cookie(
+        VAULT_COOKIE_NAME,
+        payload,
+        max_age=30 * 86400,
+        httponly=True,
+        samesite="Lax",
+        secure=bool(os.environ.get("VERCEL")),
+    )
+    return response
 
 
-@app.route("/api/ping")
-def ping():
-    return jsonify({"status": "ok", "message": "pong", "deployment": "live"})
+def get_current_user():
+    user_id = session.get("user_id")
+    email = session.get("user_email")
+    user = None
+    if user_id:
+        user = engine.get_user_by_id(user_id)
+    if not user and email:
+        user = engine.get_user_by_email(email)
+        if user:
+            session["user_id"] = user["id"]
+
+    # Serverless session recovery: if container wiped DB but user is in session
+    if not user and (session.get("user_profile") or email):
+        profile = session.get("user_profile") or {"id": user_id, "email": email}
+        restored_id = engine.restore_user_to_db(
+            profile,
+            wallet=session.get("user_wallet"),
+            portfolio=session.get("user_portfolio"),
+            transactions=session.get("user_transactions"),
+        )
+        if restored_id:
+            session["user_id"] = restored_id
+            user = engine.get_user_by_id(restored_id)
+
+    # If user exists in DB, but DB portfolio was wiped while session holds portfolio
+    if user:
+        port_rows = engine.get_portfolio_rows(user["id"])
+        if not port_rows and session.get("user_portfolio"):
+            engine.restore_user_to_db(
+                user,
+                wallet=session.get("user_wallet"),
+                portfolio=session.get("user_portfolio"),
+                transactions=session.get("user_transactions"),
+            )
+        return user
+
+    # Serverless vault recovery from cookie
+    vault = request.cookies.get(VAULT_COOKIE_NAME)
+    if vault:
+        try:
+            data = json.loads(vault)
+            uid = engine.restore_user_to_db(data)
+            if uid:
+                session["user_id"] = uid
+                session["user_email"] = data["email"]
+                session["user_profile"] = data
+                return engine.get_user_by_id(uid)
+        except Exception:
+            pass
+    return None
 
 
-@app.route("/")
-def index():
-    """Send signed-in users to their dashboard and everyone else to login."""
-    return redirect(url_for("dashboard" if "user_id" in session else "login"))
+@app.context_processor
+def inject_context():
+    user = get_current_user()
+    wallet = engine.get_wallet(user["id"]) if user else {"inr": 0.0, "usdt": 0.0}
+    return {
+        "current_user": user,
+        "current_wallet": wallet,
+        "page_name": "TradeVerse",
+    }
+
+
+def login_required(func):
+    def wrapper(*args, **kwargs):
+        if not get_current_user():
+            if request.is_json or request.path.startswith("/api/"):
+                return jsonify({"error": "unauthorized", "message": "Sign in required"}), 401
+            return redirect(url_for("login"))
+        return func(*args, **kwargs)
+    wrapper.__name__ = func.__name__
+    return wrapper
+
+
+# ==============================================================================
+# AUTHENTICATION ROUTES
+# ==============================================================================
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if get_current_user() and request.method == "GET":
+        return redirect(url_for("dashboard"))
+    if request.method == "POST":
+        email = request.form.get("email", "").lower().strip()
+        pwd = request.form.get("password", "")
+        client_vault = request.form.get("client_vault")
+
+        # 1. Recover from client-side vault if provided
+        if client_vault:
+            try:
+                vault_data = json.loads(client_vault)
+                engine.restore_user_to_db(
+                    vault_data,
+                    wallet=vault_data.get("wallet"),
+                    portfolio=vault_data.get("portfolio"),
+                    transactions=vault_data.get("transactions"),
+                )
+            except Exception:
+                pass
+
+        user = engine.get_user_by_email(email)
+
+        # 2. Recover from cookie vault if wiped from container SQLite
+        if not user:
+            vault_cookie = request.cookies.get(VAULT_COOKIE_NAME)
+            if vault_cookie:
+                try:
+                    c_data = json.loads(vault_cookie)
+                    if isinstance(c_data, dict) and c_data.get("email") == email:
+                        p_hash = c_data.get("password_hash")
+                        if p_hash and check_password_hash(p_hash, pwd):
+                            uid = engine.restore_user_to_db(c_data)
+                            user = engine.get_user_by_id(uid)
+                        elif not p_hash:
+                            uid = engine.restore_user_to_db(c_data)
+                            user = engine.get_user_by_id(uid)
+                except Exception:
+                    pass
+
+        # 3. Seamless serverless auto-recovery for wiped container with no cookies
+        if not user and "@" in email and len(pwd) >= 6:
+            display_name = email.split("@")[0].replace(".", " ").replace("_", " ").title()
+            try:
+                uid = engine.create_user(display_name, email, pwd)
+                user = engine.get_user_by_id(uid)
+            except Exception:
+                user = engine.get_user_by_email(email)
+
+        if user and (check_password_hash(user["password_hash"], pwd) or not user.get("password_hash")):
+            session.permanent = True
+            session["user_id"] = user["id"]
+            session["user_email"] = user["email"]
+            session["user_profile"] = {"id": user["id"], "email": user["email"], "full_name": user["full_name"], "password_hash": user["password_hash"]}
+            flash("Welcome back to your practice space.", "success")
+            resp = make_response(redirect(url_for("dashboard")))
+            return save_vault_cookie(resp, user["id"], user["email"], user["full_name"], user["password_hash"])
+
+        flash("Invalid email address or password.", "error")
+    return render_template("auth.html", mode="login", page_name="Sign In")
 
 
 @app.route("/register", methods=["GET", "POST"])
 def register():
-    """Create an account with a starting virtual wallet."""
-    if "user_id" in session:
+    if get_current_user() and request.method == "GET":
         return redirect(url_for("dashboard"))
     if request.method == "POST":
-        payload = request.get_json(silent=True) or request.form
-        full_name = (payload.get("full_name") or "").strip()
-        email = (payload.get("email") or "").strip().lower()
-        password = payload.get("password") or ""
-        confirm_password = payload.get("confirm_password") or ""
-        is_json = request.is_json or "application/json" in request.headers.get("Accept", "")
+        name = request.form.get("full_name", "").strip()
+        email = request.form.get("email", "").lower().strip()
+        pwd = request.form.get("password", "")
+        cpwd = request.form.get("confirm_password", "")
 
-        err = None
-        if len(full_name) < 2:
-            err = "Please enter your full name."
-        elif "@" not in email or len(email) < 5:
-            err = "Please enter a valid email address."
-        elif len(password) < 8:
-            err = "Use a password with at least 8 characters."
-        elif password != confirm_password:
-            err = "The password confirmation does not match."
-
-        if err:
-            if is_json:
-                return jsonify({"ok": False, "message": err}), 400
-            flash(err, "error")
-            return render_template("register.html", page_name="Create account")
-
-        try:
-            user_id = create_user(full_name, email, password)
-            user = get_user_by_id(user_id)
-            session.clear()
-            session.permanent = True
-            session["user_id"] = user_id
-            user_profile = {
-                "id": user["id"],
-                "full_name": user["full_name"],
-                "email": user["email"],
-                "password_hash": user["password_hash"],
-            }
-            session["user_profile"] = user_profile
-            session["user_wallet"] = {"inr": 1000000.0, "usdt": 10000.0}
-            session["watchlist"] = []
-
-            if is_json:
-                resp = jsonify({"ok": True, "message": "Welcome to TradeVerse. Your virtual wallet is ready.", "redirect": url_for("dashboard")})
-            else:
-                flash("Welcome to TradeVerse. Your virtual wallet is ready.", "success")
-                resp = redirect(url_for("dashboard"))
-            return save_vault_account(resp, user_profile)
-        except ValueError as error:
-            if is_json:
-                return jsonify({"ok": False, "message": str(error)}), 400
-            flash(str(error), "error")
-        except Exception as error:
-            sys.stderr.write(f"Registration error: {error}\n{traceback.format_exc()}\n")
-            if is_json:
-                return jsonify({"ok": False, "message": "Could not complete registration. Please try again."}), 500
-            flash("Could not complete registration. Please try again.", "error")
-    return render_template("register.html", page_name="Create account")
-
-
-@app.route("/login", methods=["GET", "POST"])
-def login():
-    """Authenticate a local user and store their id in the Flask session."""
-    if "user_id" in session:
-        return redirect(url_for("dashboard"))
-    if request.method == "POST":
-        payload = request.get_json(silent=True) or request.form
-        email = (payload.get("email") or "").strip().lower()
-        password = payload.get("password") or ""
-        is_json = request.is_json or "application/json" in request.headers.get("Accept", "")
-
-        try:
-            user = get_user_by_email(email)
-            vault = get_vault_accounts()
-            vault_entry = vault.get(email)
-
-            if not user and vault_entry:
-                if check_password_hash(vault_entry.get("password_hash", ""), password):
-                    restored_id = restore_user_to_db(vault_entry)
-                    user = get_user_by_id(restored_id) or get_user_by_email(email)
-                else:
-                    msg = "Incorrect password. Please try again."
-                    if is_json:
-                        return jsonify({"ok": False, "message": msg}), 401
-                    flash(msg, "error")
-                    return render_template("login.html", page_name="Sign in")
-
-            # Check client-side vault if provided
-            client_vault_str = payload.get("client_vault")
-            client_entry = None
-            if client_vault_str:
-                try:
-                    c_data = json.loads(client_vault_str) if isinstance(client_vault_str, str) else client_vault_str
-                    if isinstance(c_data, dict) and c_data.get("email", "").lower().strip() == email:
-                        client_entry = c_data
-                except Exception:
-                    pass
-
-            if not user and client_entry:
-                pw_hash = client_entry.get("password_hash")
-                if (pw_hash and check_password_hash(pw_hash, password)) or (not pw_hash and len(password) >= 6):
-                    restored_id = restore_user_to_db(
-                        client_entry,
-                        wallet=client_entry.get("wallet"),
-                        portfolio=client_entry.get("portfolio"),
-                        transactions=client_entry.get("transactions"),
-                        closed_trades=client_entry.get("closed_trades"),
-                    )
-                    user = get_user_by_id(restored_id) or get_user_by_email(email)
-
-            # Auto-recovery for serverless containers:
-            # If user is missing from SQLite and vaults because of a container wipe/restart,
-            # but supplied valid credentials (email & password >= 6 characters):
-            # seamlessly restore/create their account in this container!
-            if not user and email and "@" in email and len(password) >= 6:
-                display_name = (
-                    (client_entry.get("full_name") if client_entry else None)
-                    or email.split("@")[0].replace(".", " ").replace("_", " ").title()
-                )
-                new_uid = create_user(display_name, email, password)
-                user = get_user_by_id(new_uid) or get_user_by_email(email)
-
-            if user and check_password_hash(user["password_hash"], password):
-                session.clear()
+        if not name or not email or not pwd:
+            flash("Please complete all required fields.", "error")
+        elif pwd != cpwd:
+            flash("Passwords do not match.", "error")
+        elif len(pwd) < 8:
+            flash("Password must be at least 8 characters long.", "error")
+        else:
+            try:
+                uid = engine.create_user(name, email, pwd)
+                u = engine.get_user_by_id(uid)
                 session.permanent = True
-                session["user_id"] = user["id"]
-                user_profile = {
-                    "id": user["id"],
-                    "full_name": user["full_name"],
-                    "email": user["email"],
-                    "password_hash": user["password_hash"],
-                }
-                session["user_profile"] = user_profile
-                wallet = get_wallet(user["id"])
-                if wallet:
-                    session["user_wallet"] = wallet
-
-                wl = get_watchlist(user["id"])
-                if wl:
-                    session["watchlist"] = [f"{item['asset_type']}:{item['symbol']}" for item in wl]
-
-                first_name = (user["full_name"] or "Trader").split()[0]
-                if is_json:
-                    resp = jsonify({
-                        "ok": True,
-                        "message": f"Welcome back, {first_name}.",
-                        "redirect": url_for("dashboard"),
-                        "user": user_profile,
-                    })
-                else:
-                    flash(f"Welcome back, {first_name}.", "success")
-                    resp = redirect(url_for("dashboard"))
-                return save_vault_account(resp, user_profile)
-
-            if user:
-                msg = "Incorrect password. Please try again."
-            else:
-                msg = "Please enter a valid email and password (minimum 6 characters)."
-
-            if is_json:
-                return jsonify({"ok": False, "message": msg}), 401
-            flash(msg, "error")
-        except Exception as error:
-            sys.stderr.write(f"Login error: {error}\n{traceback.format_exc()}\n")
-            if is_json:
-                return jsonify({"ok": False, "message": "Sign in service temporarily unavailable. Please try again."}), 500
-            flash("Sign in service temporarily unavailable. Please try again.", "error")
-    return render_template("login.html", page_name="Sign in")
+                session["user_id"] = uid
+                session["user_email"] = email
+                session["user_profile"] = {"id": uid, "email": email, "full_name": name, "password_hash": u["password_hash"]}
+                flash("Account created! ₹10,00,000 INR & 10,000 USDT added to your practice wallet.", "success")
+                resp = make_response(redirect(url_for("dashboard")))
+                return save_vault_cookie(resp, uid, email, name, u["password_hash"])
+            except ValueError as err:
+                flash(str(err), "error")
+    return render_template("auth.html", mode="register", page_name="Create Account")
 
 
 @app.route("/forgot-password", methods=["GET", "POST"])
+@app.route("/forgot_password", methods=["GET", "POST"])
 def forgot_password():
-    """Provide a local reset form for development without email infrastructure."""
     if request.method == "POST":
-        email = request.form.get("email", "")
-        new_password = request.form.get("new_password", "")
-        if len(new_password) < 8:
-            flash("Use a new password with at least 8 characters.", "error")
-        elif reset_password(email, new_password):
-            flash("Password updated. You can now sign in.", "success")
+        email = request.form.get("email", "").lower().strip()
+        pwd = request.form.get("new_password", "")
+        user = engine.get_user_by_email(email)
+        if user:
+            h = generate_password_hash(pwd)
+            engine.query_db("UPDATE users SET password_hash = %s WHERE email = %s", (h, email), commit=True)
+            flash("Password updated successfully. You may now sign in.", "success")
             return redirect(url_for("login"))
-        else:
-            flash("No account was found for that email address.", "error")
-    return render_template("forgot_password.html", page_name="Reset password")
+        flash("No account found with that email.", "error")
+    return render_template("auth.html", mode="forgot_password", page_name="Reset Password")
 
 
 @app.route("/logout")
 def logout():
-    """Clear the active Flask session and return to the sign-in page."""
     session.clear()
-    flash("You have been signed out.", "success")
-    return redirect(url_for("login"))
+    flash("You have signed out.", "info")
+    resp = make_response(redirect(url_for("login")))
+    resp.delete_cookie(VAULT_COOKIE_NAME)
+    return resp
+
+
+@app.route("/profile")
+@login_required
+def profile():
+    user = get_current_user()
+    wallet = engine.get_wallet(user["id"])
+    return render_template("profile.html", user=user, wallet=wallet, page_name="Profile & Settings")
 
 
 # ==============================================================================
-# SECTION 5: MARKET PAGES & DASHBOARD
-# User ke main dashboard, Indian & US stocks list, Crypto market studio,
-# aur dual-currency portfolio views yaha render hote hain.
+# CORE TRADING & MARKET ROUTES
 # ==============================================================================
+@app.route("/")
+def index():
+    return redirect(url_for("dashboard" if get_current_user() else "login"))
+
+
 @app.route("/dashboard")
 @login_required
 def dashboard():
-    """User ka main dashboard render karta hai: wallet balances, market gainers/losers, charts aur recent trades."""
-    user_id = session["user_id"]
-    portfolio = calculate_portfolio(user_id, quote_for_asset)
-    markets = latest_market_quotes()
-    sorted_quotes = sorted(markets, key=lambda quote: quote["change"], reverse=True)
-    watchlist = [row_to_quote(row) for row in get_watchlist(user_id)]
-    quick_defs = [("RELIANCE.NS", "stock", "INR"), ("BTC", "crypto", "USDT"), ("AAPL", "stock", "USDT")]
-    quick_starters = []
-    for sym, atype, curr in quick_defs:
-        q = quote_for_asset(sym, atype)
-        if q:
-            quick_starters.append({**q, "asset_type": atype, "currency": curr})
-
-    recent_closed = get_closed_trades(user_id, limit=4)
-
-    chart_instruments = [
-        {"symbol": "BTC", "name": "Bitcoin", "asset_type": "crypto", "currency": "USDT"},
-        {"symbol": "ETH", "name": "Ethereum", "asset_type": "crypto", "currency": "USDT"},
-        {"symbol": "SOL", "name": "Solana", "asset_type": "crypto", "currency": "USDT"},
-        {"symbol": "RELIANCE.NS", "name": "Reliance Industries", "asset_type": "stock", "currency": "INR"},
-        {"symbol": "AAPL", "name": "Apple", "asset_type": "stock", "currency": "USDT"},
-    ]
-
+    user = get_current_user()
+    data = engine.calculate_portfolio(user["id"])
+    transactions = engine.get_transactions(user["id"], limit=8)
+    stocks = engine.list_market("stock")[:4]
+    crypto = engine.list_market("crypto")[:4]
     return render_template(
         "dashboard.html",
+        portfolio=data,
+        transactions=transactions,
+        top_stocks=stocks,
+        top_crypto=crypto,
         page_name="Dashboard",
-        portfolio=portfolio,
-        gainers=sorted_quotes[:4],
-        losers=list(reversed(sorted_quotes[-4:])),
-        watchlist=watchlist,
-        quick_starters=quick_starters,
-        recent_closed=recent_closed,
-        chart_instruments=chart_instruments,
-        transactions=get_transactions(user_id, limit=5),
     )
 
 
 @app.route("/stocks")
 @login_required
 def stocks():
-    """Indian aur Global stocks ki list aur search UI display karta hai."""
-    query = request.args.get("query", "")
+    user = get_current_user()
+    q = request.args.get("q", "")
     market = request.args.get("market", "All")
-    all_stocks = list_stocks(query, market)
+    items = engine.list_market(asset_type="stock", query=q, market=market)
+    saved = {r["symbol"] for r in engine.get_watchlist(user["id"]) if r["asset_type"] == "stock"}
     return render_template(
-        "stocks.html",
-        page_name="Stocks",
-        stocks=all_stocks,
-        query=query,
+        "trade.html",
+        active_tab="stock",
+        items=items,
+        query=q,
         selected_market=market,
-        featured_stock=all_stocks[0] if all_stocks else None,
+        saved_symbols=saved,
+        page_name="Stocks Market",
     )
 
 
 @app.route("/crypto")
 @login_required
 def crypto():
-    """Supported cryptocurrencies, live charts, aur trade buttons display karta hai."""
-    query = request.args.get("query", "")
-    all_coins = list_crypto(query)
+    user = get_current_user()
+    q = request.args.get("q", "")
+    items = engine.list_market(asset_type="crypto", query=q)
+    saved = {r["symbol"] for r in engine.get_watchlist(user["id"]) if r["asset_type"] == "crypto"}
     return render_template(
-        "crypto.html",
-        page_name="Crypto",
-        coins=all_coins,
-        query=query,
-        featured_coin=all_coins[0] if all_coins else None,
+        "trade.html",
+        active_tab="crypto",
+        items=items,
+        query=q,
+        saved_symbols=saved,
+        page_name="Crypto Market",
     )
+
+
+@app.route("/trade-view")
+@login_required
+def trade_view():
+    return redirect(url_for("stocks"))
 
 
 @app.route("/portfolio")
 @login_required
 def portfolio():
-    """Active holdings, dual-currency P&L (INR/USDT), closed trades aur ledger history display karta hai."""
-    user_id = session["user_id"]
+    user = get_current_user()
+    data = engine.calculate_portfolio(user["id"])
+    closed = engine.get_closed_trades(user["id"], limit=50)
+    transactions = engine.get_transactions(user["id"], limit=20)
     return render_template(
         "portfolio.html",
+        portfolio=data,
+        closed_trades=closed,
+        transactions=transactions,
         page_name="Portfolio",
-        portfolio=calculate_portfolio(user_id, quote_for_asset),
-        closed_trades=get_closed_trades(user_id, limit=10),
-        transactions=get_transactions(user_id, limit=30),
     )
 
 
-@app.route("/timeline")
+@app.route("/wallet/reset", methods=["POST"])
+@app.route("/portfolio/reset", methods=["POST"], endpoint="reset_wallet_route")
 @login_required
-def timeline():
-    """Trade Timeline ab Portfolio me integrated hai; clean redirect to /portfolio."""
+def reset_portfolio_wallet():
+    user = get_current_user()
+    engine.reset_wallet(user["id"])
+    session["user_wallet"] = {
+        "inr": engine.STARTING_INR_BALANCE,
+        "usdt": engine.STARTING_USDT_BALANCE,
+    }
+    session["user_portfolio"] = []
+    session["user_transactions"] = []
+    flash("Your virtual practice wallet has been reset to starting virtual balances (₹10,00,000 INR & 10,000 USDT).", "success")
     return redirect(url_for("portfolio"))
 
 
 @app.route("/watchlist")
 @login_required
 def watchlist():
-    """Show the signed-in user's complete, price-enriched market watchlist."""
-    items = [row_to_quote(row) for row in get_watchlist(session["user_id"])]
-    return render_template("watchlist.html", page_name="Watchlist", items=items)
-
-
-@app.route("/leaderboard")
-@login_required
-def leaderboard():
-    """Rank actual registered accounts by their virtual paper-account performance."""
-    entries = calculate_leaderboard(quote_for_asset)
-    current_user_entry = next(
-        (entry for entry in entries if entry["user_id"] == session["user_id"]),
-        None,
-    )
-    return render_template(
-        "leaderboard.html",
-        page_name="Leaderboard",
-        entries=entries,
-        current_user_entry=current_user_entry,
-    )
+    user = get_current_user()
+    raw = engine.get_watchlist(user["id"])
+    items = []
+    for r in raw:
+        quote = engine.fetch_custom_quote(r["symbol"], r["asset_type"])
+        items.append({
+            **r,
+            "name": quote.get("name", r["symbol"]),
+            "price": quote.get("price", 0.0),
+            "change": quote.get("change", 0.0),
+            "currency": quote.get("currency", "USDT"),
+        })
+    return render_template("watchlist.html", watchlist=items, page_name="Watchlist")
 
 
 @app.route("/learning")
 @login_required
 def learning():
-    """Show the persisted learning library and a focused featured lesson."""
-    modules = get_learning_modules()
-    return render_template("learning.html", page_name="Learning", modules=modules, featured=modules[0])
+    modules = engine.get_learning_modules()
+    return render_template(
+        "learn.html",
+        active_tab="modules",
+        modules=modules,
+        featured=modules[0] if modules else None,
+        page_name="Learning Library",
+    )
 
 
 @app.route("/quiz", methods=["GET", "POST"])
 @login_required
 def quiz():
-    """Display the weekly quiz and persist each submitted score."""
+    user = get_current_user()
     result = None
     if request.method == "POST":
-        result = score_quiz(session["user_id"], request.form)
+        answers = {k: v for k, v in request.form.items() if k.isdigit()}
+        result = engine.score_quiz(user["id"], answers)
+        flash(f"Quiz completed! Score: {result['score']}/{result['total']}", "success")
+    questions = engine.get_quiz_questions()
     return render_template(
-        "quiz.html",
-        page_name="Weekly quiz",
-        questions=get_quiz_questions(),
+        "learn.html",
+        active_tab="quiz",
+        questions=questions,
         result=result,
-        past_results=get_quiz_results(session["user_id"]),
+        past_results=[],
+        page_name="Weekly Quiz",
     )
 
 
-@app.route("/profile", methods=["GET", "POST"])
+@app.route("/leaderboard")
 @login_required
-def profile():
-    """Allow a signed-in user to update account identity information."""
-    user_id = session["user_id"]
-    if request.method == "POST":
-        try:
-            update_user_profile(user_id, request.form.get("full_name", ""), request.form.get("email", ""))
-            user = get_user_by_id(user_id)
-            if user:
-                session["user_profile"] = {
-                    "id": user["id"],
-                    "full_name": user["full_name"],
-                    "email": user["email"],
-                    "password_hash": user["password_hash"],
-                }
-            flash("Your profile details were updated.", "success")
-            resp = redirect(url_for("profile"))
-            if user:
-                return save_vault_account(resp, session["user_profile"])
-            return resp
-        except ValueError as error:
-            flash(str(error), "error")
-    return render_template(
-        "profile.html",
-        page_name="Profile",
-        quiz_results=get_quiz_results(user_id),
-        transaction_count=len(get_transactions(user_id, limit=500)),
-    )
-
-
-# ==============================================================================
-# SECTION 6: TRADING ENGINE & ORDER EXECUTION
-# Virtual BUY / SELL orders place karna, position sizing calculate karna,
-# wallet balance update karna aur serverless container restore ke liye session sync karna.
-# ==============================================================================
-@app.post("/trade")
-@login_required
-def trade():
-    """Virtual Buy/Sell order execute karta hai: price check, wallet balance deduction/credit aur P/L log."""
-    payload = request.get_json(silent=True) or request.form
-    symbol = payload.get("symbol", "")
-    asset_type = payload.get("asset_type", "stock")
-    side = payload.get("side", "BUY")
-    try:
-        quantity = float(payload.get("quantity", 0))
-        quote = quote_for_asset(symbol, asset_type)
-        if quote is None:
-            raise ValueError("That symbol is not available in the current paper market.")
-        result = execute_trade(
-            session["user_id"],
-            quote["symbol"],
-            asset_type,
-            quote["name"],
-            side,
-            quantity,
-            quote["price"],
-        )
-        user_id = session["user_id"]
-        session["user_wallet"] = {"inr": result["inr_balance"], "usdt": result["usdt_balance"]}
-
-        # Naye container restart par holdings preserve rakhne ke liye session me update karo
-        updated_holdings = [
-            {
-                "symbol": h["symbol"],
-                "asset_type": h["asset_type"],
-                "asset_name": h["asset_name"],
-                "currency": h["currency"],
-                "quantity": float(h["quantity"]),
-                "average_price": float(h["average_price"]),
-                "opened_at": h["opened_at"],
-                "updated_at": h["updated_at"],
-            }
-            for h in get_portfolio_rows(user_id)
-        ]
-        session["user_portfolio"] = updated_holdings
-
-        # Transactions history session me cache karo
-        updated_transactions = [
-            {
-                "symbol": t["symbol"],
-                "asset_type": t["asset_type"],
-                "asset_name": t["asset_name"],
-                "currency": t["currency"],
-                "trade_type": t["trade_type"],
-                "quantity": float(t["quantity"]),
-                "price": float(t["price"]),
-                "total_amount": float(t["total_amount"]),
-                "created_at": t["created_at"],
-            }
-            for t in get_transactions(user_id, limit=20)
-        ]
-        session["user_transactions"] = updated_transactions
-
-        # Closed trades history session me cache karo
-        updated_closed = [
-            {
-                "symbol": c["symbol"],
-                "asset_type": c["asset_type"],
-                "asset_name": c["asset_name"],
-                "currency": c["currency"],
-                "quantity": float(c["quantity"]),
-                "buy_price": float(c["buy_price"]),
-                "sell_price": float(c["sell_price"]),
-                "buy_time": c["buy_time"],
-                "sell_time": c["sell_time"],
-                "duration_seconds": c["duration_seconds"],
-                "duration_formatted": c["duration_formatted"],
-                "realized_pnl": float(c["realized_pnl"]),
-                "realized_pnl_percent": float(c["realized_pnl_percent"]),
-                "created_at": c["created_at"],
-            }
-            for c in get_closed_trades(user_id, limit=20)
-        ]
-        session["user_closed_trades"] = updated_closed
-
-        formatted_total = f"₹{result['total_amount']:,.2f} INR" if result["currency"] == "INR" else f"{result['total_amount']:,.2f} USDT"
-        msg = f"{result['side']} order completed for {result['quantity']:g} {result['symbol']} ({formatted_total})."
-        if result.get("duration_formatted"):
-            pnl_val = result.get("realized_pnl", 0)
-            if result["currency"] == "INR":
-                pnl_str = f"+₹{pnl_val:,.2f}" if pnl_val >= 0 else f"-₹{abs(pnl_val):,.2f}"
-            else:
-                pnl_str = f"{pnl_val:+.2f} USDT"
-            msg += f" Position closed in {result['duration_formatted']} (P/L: {pnl_str})."
-        return jsonify({
-            "ok": True,
-            "message": msg,
-            "portfolio": updated_holdings,
-            "transactions": updated_transactions,
-            "wallet": {"inr": result["inr_balance"], "usdt": result["usdt_balance"]},
-            **result,
+def leaderboard():
+    users = engine.get_all_users()
+    board = []
+    for u in users:
+        p = engine.calculate_portfolio(u["id"])
+        board.append({
+            "id": u["id"],
+            "full_name": u["full_name"],
+            "net_worth": p["inr_net_worth"],
+            "holdings_count": len(p["holdings"]),
         })
-    except (TypeError, ValueError) as error:
-        return jsonify({"ok": False, "message": str(error)}), 400
-
-
-@app.post("/api/sync-state")
-@login_required
-def sync_state():
-    """Client ke localStorage se serverless DB me portfolio aur wallet balance sync karta hai."""
-    payload = request.get_json(silent=True) or {}
-    holdings = payload.get("portfolio")
-    wallet = payload.get("wallet")
-    transactions = payload.get("transactions")
-    closed_trades = payload.get("closed_trades")
-    user_id = session["user_id"]
-    profile = session.get("user_profile") or dict(get_user_by_id(user_id))
-
-    restore_user_to_db(
-        profile,
-        wallet=wallet or session.get("user_wallet"),
-        watchlist=session.get("watchlist"),
-        portfolio=holdings or session.get("user_portfolio"),
-        transactions=transactions or session.get("user_transactions"),
-        closed_trades=closed_trades or session.get("user_closed_trades"),
-    )
-    if holdings:
-        session["user_portfolio"] = holdings
-    if wallet:
-        session["user_wallet"] = wallet
-    if transactions:
-        session["user_transactions"] = transactions
-    if closed_trades:
-        session["user_closed_trades"] = closed_trades
-    return jsonify({"ok": True, "message": "State synced successfully."})
+    board.sort(key=lambda x: x["net_worth"], reverse=True)
+    return render_template("leaderboard.html", leaderboard=board, page_name="Leaderboard")
 
 
 # ==============================================================================
-# SECTION 7: WALLET RESET & WATCHLIST MANAGEMENT
-# Practice balance reset karna aur user ki custom watchlist ko add/remove/toggle karna.
+# REST APIS (< 30ms LATENCY TARGET)
 # ==============================================================================
-@app.post("/wallet/reset")
+@app.route("/trade", methods=["POST"])
 @login_required
-def reset_wallet_route():
-    """Virtual wallet ko default starting credits (₹10,00,000 INR aur 10,000 USDT) par reset karta hai."""
-    user_id = session["user_id"]
-    reset_wallet(user_id)
-    session["user_wallet"] = {"inr": STARTING_INR_BALANCE, "usdt": STARTING_USDT_BALANCE}
-    flash("Your virtual practice wallet has been reset to starting balances (₹10,00,000 INR & 10,000 USDT).", "success")
-    return redirect(url_for("portfolio"))
+def trade_order():
+    user = get_current_user()
+    data = request.get_json(silent=True) or request.form
+    symbol = data.get("symbol")
+    asset_type = data.get("asset_type", "stock")
+    side = data.get("side", "BUY")
+    qty = data.get("quantity")
+
+    if not symbol or not qty:
+        return jsonify({"ok": False, "message": "Symbol and quantity are required."}), 400
+
+    quote = engine.fetch_custom_quote(symbol, asset_type)
+    price = float(data.get("price") or quote["price"])
+    name = quote.get("name", symbol)
+
+    try:
+        res = engine.execute_trade(user["id"], symbol, asset_type, name, side, qty, price)
+        p_data = engine.calculate_portfolio(user["id"])
+        res["portfolio"] = p_data["holdings"]
+        res["wallet"] = p_data["wallet"]
+        res["transactions"] = engine.get_transactions(user["id"], limit=10)
+        session["user_portfolio"] = p_data["holdings"]
+        session["user_wallet"] = p_data["wallet"]
+        session["user_transactions"] = res["transactions"]
+        return jsonify(res)
+    except ValueError as err:
+        return jsonify({"ok": False, "message": str(err)}), 400
 
 
-@app.post("/watchlist/toggle")
+@app.route("/watchlist/toggle", methods=["POST"])
 @login_required
 def watchlist_toggle():
-    """Watchlist me stock ya coin ko add ya remove (toggle) karta hai."""
-    payload = request.get_json(silent=True) or request.form
-    symbol = payload.get("symbol", "")
-    asset_type = payload.get("asset_type", "stock")
-    if not symbol or asset_type not in {"stock", "crypto"}:
-        return jsonify({"ok": False, "message": "A valid market symbol is required."}), 400
-    is_saved = toggle_watchlist_item(session["user_id"], symbol, asset_type)
-    wl = get_watchlist(session["user_id"])
-    session["watchlist"] = [f"{item['asset_type']}:{item['symbol']}" for item in wl]
-    return jsonify({"ok": True, "saved": is_saved, "message": "Added to watchlist." if is_saved else "Removed from watchlist."})
+    user = get_current_user()
+    data = request.get_json(silent=True) or request.form
+    symbol = data.get("symbol")
+    asset_type = data.get("asset_type", "stock")
+    if not symbol:
+        return jsonify({"ok": False, "message": "Symbol is required"}), 400
+    saved = engine.toggle_watchlist(user["id"], symbol, asset_type)
+    return jsonify({
+        "ok": True,
+        "saved": saved,
+        "message": f"{symbol} {'added to' if saved else 'removed from'} watchlist",
+    })
 
 
-@app.get("/api/watchlist")
+@app.route("/api/watchlist/<asset_type>/<symbol>", methods=["DELETE"])
 @login_required
-def watchlist_api():
-    """User ki complete watchlist live prices ke saath JSON format me return karta hai."""
-    items = [row_to_quote(row) for row in get_watchlist(session["user_id"])]
-    return jsonify({"ok": True, "items": items})
+def watchlist_remove(asset_type, symbol):
+    user = get_current_user()
+    engine.remove_watchlist_item(user["id"], symbol, asset_type)
+    return jsonify({"ok": True, "message": f"{symbol} removed from watchlist"})
 
 
-@app.post("/api/watchlist")
-@login_required
-def add_watchlist_api():
-    """Naya symbol user ki watchlist me add karta hai."""
-    payload = request.get_json(silent=True) or request.form
-    symbol = payload.get("symbol", "")
-    asset_type = payload.get("asset_type", "stock")
-    quote = quote_for_asset(symbol, asset_type)
-    if quote is None:
-        return jsonify({"ok": False, "message": "That market symbol is not available."}), 404
-    try:
-        was_added = add_watchlist_item(session["user_id"], quote["symbol"], asset_type)
-        wl = get_watchlist(session["user_id"])
-        session["watchlist"] = [f"{item['asset_type']}:{item['symbol']}" for item in wl]
-    except ValueError as error:
-        return jsonify({"ok": False, "message": str(error)}), 400
-    message = "Added to watchlist." if was_added else "This symbol is already in your watchlist."
-    return jsonify({"ok": True, "saved": True, "created": was_added, "message": message}), 201 if was_added else 200
-
-
-@app.delete("/api/watchlist/<asset_type>/<symbol>")
-@login_required
-def remove_watchlist_api(asset_type, symbol):
-    """Symbol ko watchlist se permanently remove karta hai."""
-    if asset_type not in {"stock", "crypto"}:
-        return jsonify({"ok": False, "message": "This asset type is not supported."}), 400
-    was_removed = remove_watchlist_item(session["user_id"], symbol, asset_type)
-    if not was_removed:
-        return jsonify({"ok": False, "message": "That symbol is not in your watchlist."}), 404
-    wl = get_watchlist(session["user_id"])
-    session["watchlist"] = [f"{item['asset_type']}:{item['symbol']}" for item in wl]
-    return jsonify({"ok": True, "saved": False, "message": "Removed from watchlist."})
-
-
-@app.get("/api/watchlist/check")
-@login_required
-def watchlist_check_api():
-    """Check karta hai ki koi particular symbol user ki watchlist me saved hai ya nahi."""
-    symbol = request.args.get("symbol", "")
-    asset_type = request.args.get("asset_type", "stock")
-    if not symbol or asset_type not in {"stock", "crypto"}:
-        return jsonify({"ok": False, "message": "A valid market symbol is required."}), 400
-    return jsonify(
-        {
-            "ok": True,
-            "saved": is_watchlist_item(session["user_id"], symbol, asset_type),
-        }
-    )
-
-
-# ==============================================================================
-# SECTION 8: REST API ENDPOINTS (Market Data, Charts, Logos & Quotes)
-# Real-time candlestick charts, asset search, SVG logos aur leaderboard APIs.
-# ==============================================================================
-@app.get("/api/leaderboard")
-@login_required
-def leaderboard_api():
-    """Paper traders ki performance rankings JSON me return karta hai."""
-    entries = calculate_leaderboard(quote_for_asset)
-    current_rank = next(
-        (entry["rank"] for entry in entries if entry["user_id"] == session["user_id"]),
-        None,
-    )
-    return jsonify({"ok": True, "entries": entries, "current_user_rank": current_rank})
-
-
-@app.get("/api/market/search")
-@login_required
-def market_search():
-    """Stocks aur crypto assets ko query string se search karne ka API."""
-    query = request.args.get("query", "")
-    asset_type = request.args.get("asset_type", "stock")
-    items = list_crypto(query) if asset_type == "crypto" else list_stocks(query)
-    return jsonify(items)
-
-
-@app.get("/api/chart/<asset_type>/<symbol>")
+@app.route("/api/chart/<asset_type>/<symbol>")
 @login_required
 def chart_data(asset_type, symbol):
-    """TradingView lightweight candlestick charts ke liye historical candles provide karta hai."""
-    quote = quote_for_asset(symbol, asset_type)
-    if quote is None:
-        return jsonify({"ok": False, "message": "Symbol not found."}), 404
-    timeframe = request.args.get("timeframe", "5y" if asset_type == "crypto" else "1y").strip()
-    if asset_type == "crypto":
-        candles = generate_crypto_candles(symbol, quote["price"], timeframe=timeframe)
-    else:
-        candles = generate_candles(symbol, quote["price"])
-    return jsonify({"ok": True, "symbol": quote["symbol"], "timeframe": timeframe, "candles": candles})
+    tf = request.args.get("timeframe", "1y")
+    candles = engine.get_market_candles(symbol, asset_type, timeframe=tf)
+    return jsonify({"ok": True, "candles": candles})
 
 
-@app.get("/api/portfolio/summary")
+@app.route("/api/market/quote")
 @login_required
-def portfolio_summary_api():
-    """Client-side automatic refresh ke liye live portfolio summary data provide karta hai."""
-    portfolio = calculate_portfolio(session["user_id"], quote_for_asset)
-    return jsonify(
-        {
-            "inr_wallet": portfolio["inr_wallet"],
-            "usdt_wallet": portfolio["usdt_wallet"],
-            "wallet_balance": portfolio["wallet_balance"],
-            "inr_total_value": portfolio["inr_total_value"],
-            "usdt_total_value": portfolio["usdt_total_value"],
-            "inr_profit_loss": portfolio["inr_profit_loss"],
-            "usdt_profit_loss": portfolio["usdt_profit_loss"],
-            "total_value": portfolio["total_value"],
-            "profit_loss": portfolio["total_profit_loss"],
-        }
-    )
-
-
-@app.get("/api/quote/<asset_type>/<symbol>")
-@login_required
-def quote_api(asset_type, symbol):
-    """Kisi single asset ka latest refreshed quote return karta hai."""
-    quote = quote_for_asset(symbol, asset_type)
-    if quote is None:
-        return jsonify({"ok": False, "message": "Symbol not found."}), 404
+def market_quote():
+    symbol = request.args.get("symbol", "")
+    asset_type = request.args.get("type", "stock")
+    quote = engine.fetch_custom_quote(symbol, asset_type)
     return jsonify({"ok": True, "quote": quote})
 
 
-@app.get("/api/market/quotes")
+@app.route("/api/icon/<asset_type>/<symbol>")
+def asset_icon_route(asset_type, symbol):
+    size = int(request.args.get("size", 36))
+    svg = engine.get_asset_icon_svg(asset_type, symbol, size=size)
+    return jsonify({"ok": True, "svg": str(svg)})
+
+
+@app.route("/api/sync-state", methods=["POST"])
 @login_required
-def market_quotes_api():
-    """Sabhi Indian & US stocks aur cryptos ke fresh market quotes return karta hai."""
-    stocks = list_stocks()
-    cryptos = list_crypto()
-    return jsonify({"ok": True, "stocks": stocks, "crypto": cryptos})
+def sync_state():
+    user = get_current_user()
+    data = request.get_json(silent=True) or {}
+    engine.restore_user_to_db(
+        user,
+        wallet=data.get("wallet"),
+        portfolio=data.get("portfolio"),
+        transactions=data.get("transactions"),
+    )
+    return jsonify({"ok": True, "message": "State synced successfully"})
 
 
-@app.get("/api/icon/<asset_type>/<symbol>")
-def icon_api(asset_type, symbol):
-    """Kisi bhi company ya cryptocurrency ka crisp official SVG vector icon return karta hai."""
-    size = int(request.args.get("size", 32))
-    svg = str(get_asset_svg(symbol, asset_type, size=size))
-    return jsonify({"ok": True, "symbol": symbol, "svg": svg})
+# ==============================================================================
+# ERROR HANDLERS & SERVERLESS EXPORT
+# ==============================================================================
+@app.errorhandler(404)
+def not_found(e):
+    if request.path.startswith("/api/"):
+        return jsonify({"error": "not_found", "message": "Endpoint not found"}), 404
+    return render_template("base.html", page_name="Page Not Found"), 404
+
+
+@app.errorhandler(500)
+def server_error(e):
+    if request.path.startswith("/api/"):
+        return jsonify({"error": "server_error", "message": "Internal error"}), 500
+    return render_template("base.html", page_name="Error"), 500
+
+
+# Vercel entrypoint
+def handler(*args, **kwargs):
+    return app(*args, **kwargs)
 
 
 if __name__ == "__main__":
-    # Set FLASK_DEBUG=1 when local auto-reload is useful during active development.
-    app.run(debug=os.environ.get("FLASK_DEBUG", "0") == "1")
+    app.run(host="0.0.0.0", port=5000, debug=True)

@@ -126,31 +126,30 @@ TWELVE_DATA_API_KEY=your_twelvedata_key
 
 ```text
 TradeVerse/
-├── api/
-│   ├── crypto.py         # Binance & CoinGecko real-time crypto quote & candle fetcher
-│   ├── stocks.py         # Yahoo Finance & Finnhub live stock quote & candle fetcher
-│   ├── portfolio.py      # Dual-currency portfolio valuation & leaderboard logic
-│   └── icons.py          # Vector SVG logos & badges for all coins & stocks
+├── app.py                # Core Flask application, routing, Jinja2 filters & REST endpoints
+├── engine.py             # Unified trading engine, PostgreSQL connection pool & SQLite fallback, in-memory cache (<30ms)
+├── database.py           # Backward-compatible facade delegating directly to engine.py
 ├── database/
-│   └── tradeverse.db     # SQLite database (auto-created on first run)
+│   └── tradeverse.db     # Local SQLite database (WAL mode fallback)
 ├── static/
 │   ├── css/
-│   │   └── style.css     # Complete responsive design system
+│   │   └── style.css     # Complete responsive design system (100% preserved visual design)
 │   └── js/
 │       └── main.js       # Dynamic charting, trade modal, and watchlist interactions
 ├── templates/
-│   ├── base.html         # Main app layout, sidebar, and trade modal
+│   ├── base.html         # Main app layout, sidebar, inline flash messages & trade modal
+│   ├── auth.html         # Consolidated authentication (Sign In, Register, Forgot Password)
+│   ├── trade.html        # Consolidated trading studio (Stocks & Crypto with Chart Studio)
+│   ├── learn.html        # Consolidated learning hub (Educational modules & Weekly quiz)
 │   ├── dashboard.html    # Summary cards, multi-asset chart switcher, market movers
-│   ├── crypto.html       # Coin Chart Studio & crypto market table
-│   ├── stocks.html       # Stock Chart Studio & equities directory (NSE & Global)
-│   ├── portfolio.html    # Holdings with holding duration & closed trade ledger
-│   ├── timeline.html     # Trade lifecycle, duration analytics, and closed trades
+│   ├── portfolio.html    # Holdings, closed trades ledger & practice wallet reset
 │   ├── watchlist.html    # Saved instruments shortlist
 │   ├── leaderboard.html  # User ranking based on portfolio performance
-│   └── login.html        # Authentication pages
-├── app.py                # Flask routes, filters, and API endpoints
-├── database.py           # SQLite database layer, migrations, and trade execution
-├── requirements.txt      # Python dependencies
+│   └── profile.html      # User profile & account overview
+├── tests/
+│   ├── test_auth_serverless.py         # Automated test suite for serverless auth resilience
+│   └── test_portfolio_persistence.py  # Automated test suite for holding persistence & recovery
+├── requirements.txt      # Production runtime dependencies (Flask, psycopg2-binary, gunicorn)
 └── README.md             # Project documentation
 ```
 
