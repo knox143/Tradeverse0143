@@ -1,7 +1,21 @@
-/* TradeVerse browser behavior: navigation, dynamic candlestick charts, studios, timeline, watchlists, and paper orders. */
+/**
+ * TradeVerse Frontend Application Script (main.js)
+ * ==================================================
+ * Is file me TradeVerse frontend ke core interactive modules hain:
+ * - SECTION 1: TRADE DIALOG & ORDER EXECUTION (Buy/Sell modal, order calculation, dual-currency formatting)
+ * - SECTION 2: WATCHLIST CONTROLS (Live add/remove/toggle with instant UI feedback)
+ * - SECTION 3: CANDLESTICK & PORTFOLIO CHART ENGINE (TradingView Lightweight Charts, timeframe switching)
+ * - SECTION 4: CHART STUDIOS & TAB SWITCHERS (Crypto & Stock Chart Studios, Dashboard Tabs)
+ * - SECTION 5: CLIENT-SIDE PERSISTENCE & AUTO-RECOVERY (Protects user portfolio & wallet against serverless container resets)
+ * - SECTION 6: DOM INITIALIZATION & EVENT LISTENERS
+ */
 (function () {
     "use strict";
 
+    // ==============================================================================
+    // SECTION 1: TRADE DIALOG & ORDER EXECUTION
+    // Virtual Buy/Sell dialog, live order estimation, and dual-currency handling.
+    // ==============================================================================
     const tradeDialog = document.getElementById("trade-dialog");
     const tradeForm = document.getElementById("trade-form");
     const tradeSymbol = document.getElementById("trade-symbol");
@@ -215,6 +229,10 @@
         }
     }
 
+    // ==============================================================================
+    // SECTION 2: WATCHLIST CONTROLS
+    // Assets ko watchlist me add, remove, ya toggle karne ke live asynchronous functions.
+    // ==============================================================================
     /** Add or remove a market symbol from the authenticated user's watchlist. */
     async function toggleWatchlist(button) {
         button.disabled = true;
@@ -278,6 +296,10 @@
         }
     }
 
+    // ==============================================================================
+    // SECTION 3: CANDLESTICK & PORTFOLIO CHART ENGINE
+    // TradingView Lightweight Charts ka use karke live candlestick chart render karta hai.
+    // ==============================================================================
     /** Render a real-time candlestick chart in any container for any symbol. */
     async function renderCandlestickChart(container, assetType, symbol, timeframe) {
         if (!window.LightweightCharts || !container || !assetType || !symbol) return;
@@ -415,6 +437,10 @@
         }
     }
 
+    // ==============================================================================
+    // SECTION 4: CHART STUDIOS & TAB SWITCHERS
+    // Crypto Studio, Stock Studio, aur Dashboard Chart Tabs ko manage karta hai.
+    // ==============================================================================
     /** Setup the Coin Chart Studio on the crypto page. */
     function setupCryptoStudio() {
         const studio = document.getElementById("crypto-chart-studio");
@@ -645,6 +671,11 @@
         });
     }
 
+    // ==============================================================================
+    // SECTION 5: CLIENT-SIDE PERSISTENCE & AUTO-RECOVERY
+    // Ephemeral serverless container resets ke against client-side localStorage me
+    // holdings aur balances snapshot/sync karta hai taaki virtual data lose na ho.
+    // ==============================================================================
     /** Snapshot rendered portfolio holdings into client-side localStorage. */
     function snapshotCurrentPortfolio() {
         if (!window.currentUserId) return;
@@ -734,6 +765,10 @@
         }
     }
 
+    // ==============================================================================
+    // SECTION 6: DOM INITIALIZATION & EVENT LISTENERS
+    // Page load hone par sabhi UI elements, buttons, aur studios bind karta hai.
+    // ==============================================================================
     /** Connect every page-local interaction once the DOM is ready. */
     function initializePage() {
         refreshIcons();

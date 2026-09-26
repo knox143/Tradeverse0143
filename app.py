@@ -1,21 +1,31 @@
-"""Flask routes and request handling for the TradeVerse paper trading platform."""
+"""
+TradeVerse - Main Application Server (Flask)
+========================================================================================
+Yeh file TradeVerse application ka main backend controller hai.
+Isme routing, user authentication, virtual trading execution, serverless auto-recovery,
+aur real-time market API endpoints handle hote hain.
+========================================================================================
+"""
 
+import json
 import os
 from functools import wraps
-
-from flask import Flask, flash, jsonify, redirect, render_template, request, session, url_for
 from pathlib import Path
 import sys
 import traceback
-import json
-from werkzeug.security import check_password_hash
-from werkzeug.middleware.proxy_fix import ProxyFix
-from itsdangerous import URLSafeSerializer
 
+from flask import Flask, flash, jsonify, redirect, render_template, request, session, url_for
+from itsdangerous import URLSafeSerializer
+from werkzeug.middleware.proxy_fix import ProxyFix
+from werkzeug.security import check_password_hash
+
+# --- External Market Data Services (Crypto, Stocks, Icons, Portfolio Math) ---
 from api.crypto import generate_crypto_candles, get_crypto_quote, list_crypto
 from api.icons import get_asset_svg, get_market_pair
 from api.portfolio import calculate_leaderboard, calculate_portfolio
 from api.stocks import generate_candles, get_stock_quote, list_stocks
+
+# --- SQLite Database Helper Functions (Users, Orders, Wallets, Learning) ---
 from database import (
     STARTING_INR_BALANCE,
     STARTING_USDT_BALANCE,
@@ -27,7 +37,6 @@ from database import (
     get_portfolio_rows,
     get_quiz_questions,
     get_quiz_results,
-    get_trade_timeline_stats,
     get_transactions,
     get_user_by_email,
     get_user_by_id,
@@ -45,7 +54,10 @@ from database import (
     update_user_profile,
 )
 
-
+# ==============================================================================
+# SECTION 1: FLASK APP & PROXY SETUP (Server Configuration)
+# Vercel reverse proxy ke piche HTTPS headers accurately detect karne ke liye ProxyFix.
+# ==============================================================================
 BASE_DIR = Path(__file__).resolve().parent
 app = Flask(
     __name__,
@@ -53,7 +65,7 @@ app = Flask(
     static_folder=str(BASE_DIR / "static"),
 )
 
-# Enable ProxyFix so Flask recognizes HTTPS scheme and headers from Vercel's edge proxy
+# ProxyFix: Ensures request.is_secure is True on Vercel HTTPS
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 
 secret_key = (
@@ -72,11 +84,17 @@ app.config.update(
     SESSION_COOKIE_SECURE=_is_sec,
 )
 
+# ==============================================================================
+# SECTION 2: SERVERLESS PERSISTENCE & COOKIE VAULT
+# Vercel serverless containers restart hone par SQLite DB wipe ho jata hai.
+# Yeh system cookie vault aur session se user account, wallet, aur portfolio ko
+# naye container ke SQLite me automatically restore karta hai taaki data kabhi loss na ho.
+# ==============================================================================
 vault_serializer = URLSafeSerializer(secret_key, salt="tradeverse-vault-v1")
 
 
 def get_vault_accounts():
-    """Retrieve signed persistent account records stored in the client cookie."""
+    """Client ke signed persistent cookie ('tv_account_vault') se accounts retrieve karta hai."""
     token = request.cookies.get("tv_account_vault")
     if not token:
         return {}
@@ -88,7 +106,7 @@ def get_vault_accounts():
 
 
 def save_vault_account(response, user_dict):
-    """Save user identity to the signed persistent cookie across Lambda containers."""
+    """User profile ko 90 dino ke liye secure browser cookie me encrypt karke save karta hai."""
     try:
         vault = get_vault_accounts()
         email = str(user_dict["email"]).lower().strip()
@@ -118,7 +136,8 @@ def save_vault_account(response, user_dict):
 
 @app.before_request
 def ensure_session_user_in_db():
-    """Ensure user stored in signed session is restored into the local SQLite container."""
+    """Har request se pehle check karta hai ki user local container DB me maujood hai ya nahi.
+    Agar naya container spawn hua ho toh session/vault se user aur holdings ko auto-restore karta hai."""
     profile = session.get("user_profile")
     if profile and isinstance(profile, dict):
         user_id = profile.get("id") or session.get("user_id")
@@ -136,7 +155,7 @@ def ensure_session_user_in_db():
                 session["user_id"] = restored_id
                 session["user_profile"]["id"] = restored_id
         else:
-            # If user exists in DB but holdings table is empty and session has portfolio, restore them
+            # Agar user DB me hai par holdings table empty hai aur session me holdings hain toh restore karo
             session_portfolio = session.get("user_portfolio")
             if session_portfolio and isinstance(session_portfolio, list) and len(session_portfolio) > 0:
                 db_holdings = get_portfolio_rows(user_id)
@@ -240,9 +259,14 @@ def latest_market_quotes():
     return stocks + crypto
 
 
+# ==============================================================================
+# SECTION 3: TEMPLATE FILTERS & CONTEXT HELPERS
+# UI rendering me currency formats (INR ₹, USDT), P/L positive/negative color tags,
+# live SVG vector logos aur layout global data inject karne ke filters.
+# ==============================================================================
 @app.context_processor
 def inject_layout_data():
-    """Expose current account, wallet, and watchlist symbols to every Jinja template."""
+    """Har Jinja template ko current user, wallet balance, aur watchlist provide karta hai."""
     user = get_user_by_id(session["user_id"]) if "user_id" in session else None
     watchlist_keys = set()
     wallet = {"inr": 0.0, "usdt": 0.0}
@@ -537,10 +561,15 @@ def logout():
     return redirect(url_for("login"))
 
 
+# ==============================================================================
+# SECTION 5: MARKET PAGES & DASHBOARD
+# User ke main dashboard, Indian & US stocks list, Crypto market studio,
+# aur dual-currency portfolio views yaha render hote hain.
+# ==============================================================================
 @app.route("/dashboard")
 @login_required
 def dashboard():
-    """Render wallet, portfolio, watchlist, trade timeline, and market-mover information."""
+    """User ka main dashboard render karta hai: wallet balances, market gainers/losers, charts aur recent trades."""
     user_id = session["user_id"]
     portfolio = calculate_portfolio(user_id, quote_for_asset)
     markets = latest_market_quotes()
@@ -554,7 +583,6 @@ def dashboard():
             quick_starters.append({**q, "asset_type": atype, "currency": curr})
 
     recent_closed = get_closed_trades(user_id, limit=4)
-    timeline_stats = get_trade_timeline_stats(user_id)
 
     chart_instruments = [
         {"symbol": "BTC", "name": "Bitcoin", "asset_type": "crypto", "currency": "USDT"},
@@ -573,17 +601,15 @@ def dashboard():
         watchlist=watchlist,
         quick_starters=quick_starters,
         recent_closed=recent_closed,
-        timeline_stats=timeline_stats,
         chart_instruments=chart_instruments,
         transactions=get_transactions(user_id, limit=5),
     )
 
 
-
 @app.route("/stocks")
 @login_required
 def stocks():
-    """Show Indian and global stocks from a searchable local market list."""
+    """Indian aur Global stocks ki list aur search UI display karta hai."""
     query = request.args.get("query", "")
     market = request.args.get("market", "All")
     all_stocks = list_stocks(query, market)
@@ -600,7 +626,7 @@ def stocks():
 @app.route("/crypto")
 @login_required
 def crypto():
-    """Show supported cryptocurrency quotes, dedicated coin charts, and paper-trading actions."""
+    """Supported cryptocurrencies, live charts, aur trade buttons display karta hai."""
     query = request.args.get("query", "")
     all_coins = list_crypto(query)
     return render_template(
@@ -615,14 +641,13 @@ def crypto():
 @app.route("/portfolio")
 @login_required
 def portfolio():
-    """Render current holdings with position ages, performance totals, and transaction history."""
+    """Active holdings, dual-currency P&L (INR/USDT), closed trades aur ledger history display karta hai."""
     user_id = session["user_id"]
     return render_template(
         "portfolio.html",
         page_name="Portfolio",
         portfolio=calculate_portfolio(user_id, quote_for_asset),
         closed_trades=get_closed_trades(user_id, limit=10),
-        timeline_stats=get_trade_timeline_stats(user_id),
         transactions=get_transactions(user_id, limit=30),
     )
 
@@ -630,18 +655,8 @@ def portfolio():
 @app.route("/timeline")
 @login_required
 def timeline():
-    """Display the full closed-trade lifecycle timeline and holding duration metrics."""
-    user_id = session["user_id"]
-    portfolio_data = calculate_portfolio(user_id, quote_for_asset)
-    closed_trades = get_closed_trades(user_id, limit=100)
-    timeline_stats = get_trade_timeline_stats(user_id)
-    return render_template(
-        "timeline.html",
-        page_name="Trade Timeline",
-        closed_trades=closed_trades,
-        timeline_stats=timeline_stats,
-        holdings=portfolio_data["holdings"],
-    )
+    """Trade Timeline ab Portfolio me integrated hai; clean redirect to /portfolio."""
+    return redirect(url_for("portfolio"))
 
 
 @app.route("/watchlist")
@@ -724,10 +739,15 @@ def profile():
     )
 
 
+# ==============================================================================
+# SECTION 6: TRADING ENGINE & ORDER EXECUTION
+# Virtual BUY / SELL orders place karna, position sizing calculate karna,
+# wallet balance update karna aur serverless container restore ke liye session sync karna.
+# ==============================================================================
 @app.post("/trade")
 @login_required
 def trade():
-    """Validate a quote, execute an order, and return JSON for the modal UI."""
+    """Virtual Buy/Sell order execute karta hai: price check, wallet balance deduction/credit aur P/L log."""
     payload = request.get_json(silent=True) or request.form
     symbol = payload.get("symbol", "")
     asset_type = payload.get("asset_type", "stock")
@@ -749,7 +769,7 @@ def trade():
         user_id = session["user_id"]
         session["user_wallet"] = {"inr": result["inr_balance"], "usdt": result["usdt_balance"]}
 
-        # Persist updated portfolio holdings in session for serverless recovery
+        # Naye container restart par holdings preserve rakhne ke liye session me update karo
         updated_holdings = [
             {
                 "symbol": h["symbol"],
@@ -765,7 +785,7 @@ def trade():
         ]
         session["user_portfolio"] = updated_holdings
 
-        # Persist transactions in session for serverless recovery
+        # Transactions history session me cache karo
         updated_transactions = [
             {
                 "symbol": t["symbol"],
@@ -782,7 +802,7 @@ def trade():
         ]
         session["user_transactions"] = updated_transactions
 
-        # Persist closed trades in session for serverless recovery
+        # Closed trades history session me cache karo
         updated_closed = [
             {
                 "symbol": c["symbol"],
@@ -828,7 +848,7 @@ def trade():
 @app.post("/api/sync-state")
 @login_required
 def sync_state():
-    """Synchronize user portfolio and wallet from client-side browser storage if serverless DB restarted."""
+    """Client ke localStorage se serverless DB me portfolio aur wallet balance sync karta hai."""
     payload = request.get_json(silent=True) or {}
     holdings = payload.get("portfolio")
     wallet = payload.get("wallet")
@@ -856,10 +876,14 @@ def sync_state():
     return jsonify({"ok": True, "message": "State synced successfully."})
 
 
+# ==============================================================================
+# SECTION 7: WALLET RESET & WATCHLIST MANAGEMENT
+# Practice balance reset karna aur user ki custom watchlist ko add/remove/toggle karna.
+# ==============================================================================
 @app.post("/wallet/reset")
 @login_required
 def reset_wallet_route():
-    """Reset virtual practice balance back to starting amounts (₹1,000,000 INR & 10,000 USDT)."""
+    """Virtual wallet ko default starting credits (₹10,00,000 INR aur 10,000 USDT) par reset karta hai."""
     user_id = session["user_id"]
     reset_wallet(user_id)
     session["user_wallet"] = {"inr": STARTING_INR_BALANCE, "usdt": STARTING_USDT_BALANCE}
@@ -870,7 +894,7 @@ def reset_wallet_route():
 @app.post("/watchlist/toggle")
 @login_required
 def watchlist_toggle():
-    """Toggle one saved quote and tell JavaScript which state is now active."""
+    """Watchlist me stock ya coin ko add ya remove (toggle) karta hai."""
     payload = request.get_json(silent=True) or request.form
     symbol = payload.get("symbol", "")
     asset_type = payload.get("asset_type", "stock")
@@ -885,7 +909,7 @@ def watchlist_toggle():
 @app.get("/api/watchlist")
 @login_required
 def watchlist_api():
-    """Return the current user's full watchlist with live or fallback quote data."""
+    """User ki complete watchlist live prices ke saath JSON format me return karta hai."""
     items = [row_to_quote(row) for row in get_watchlist(session["user_id"])]
     return jsonify({"ok": True, "items": items})
 
@@ -893,7 +917,7 @@ def watchlist_api():
 @app.post("/api/watchlist")
 @login_required
 def add_watchlist_api():
-    """Add a valid market symbol without duplicating an existing user-specific item."""
+    """Naya symbol user ki watchlist me add karta hai."""
     payload = request.get_json(silent=True) or request.form
     symbol = payload.get("symbol", "")
     asset_type = payload.get("asset_type", "stock")
@@ -913,7 +937,7 @@ def add_watchlist_api():
 @app.delete("/api/watchlist/<asset_type>/<symbol>")
 @login_required
 def remove_watchlist_api(asset_type, symbol):
-    """Remove only the authenticated user's selected watchlist item."""
+    """Symbol ko watchlist se permanently remove karta hai."""
     if asset_type not in {"stock", "crypto"}:
         return jsonify({"ok": False, "message": "This asset type is not supported."}), 400
     was_removed = remove_watchlist_item(session["user_id"], symbol, asset_type)
@@ -927,7 +951,7 @@ def remove_watchlist_api(asset_type, symbol):
 @app.get("/api/watchlist/check")
 @login_required
 def watchlist_check_api():
-    """Report whether a symbol is saved for the signed-in user."""
+    """Check karta hai ki koi particular symbol user ki watchlist me saved hai ya nahi."""
     symbol = request.args.get("symbol", "")
     asset_type = request.args.get("asset_type", "stock")
     if not symbol or asset_type not in {"stock", "crypto"}:
@@ -940,10 +964,14 @@ def watchlist_check_api():
     )
 
 
+# ==============================================================================
+# SECTION 8: REST API ENDPOINTS (Market Data, Charts, Logos & Quotes)
+# Real-time candlestick charts, asset search, SVG logos aur leaderboard APIs.
+# ==============================================================================
 @app.get("/api/leaderboard")
 @login_required
 def leaderboard_api():
-    """Return actual registered-user paper-account ranks for progressive UI updates."""
+    """Paper traders ki performance rankings JSON me return karta hai."""
     entries = calculate_leaderboard(quote_for_asset)
     current_rank = next(
         (entry["rank"] for entry in entries if entry["user_id"] == session["user_id"]),
@@ -955,7 +983,7 @@ def leaderboard_api():
 @app.get("/api/market/search")
 @login_required
 def market_search():
-    """Provide a compact JSON market search endpoint for future progressive enhancements."""
+    """Stocks aur crypto assets ko query string se search karne ka API."""
     query = request.args.get("query", "")
     asset_type = request.args.get("asset_type", "stock")
     items = list_crypto(query) if asset_type == "crypto" else list_stocks(query)
@@ -965,7 +993,7 @@ def market_search():
 @app.get("/api/chart/<asset_type>/<symbol>")
 @login_required
 def chart_data(asset_type, symbol):
-    """Return chart-compatible candles for a supported stock or crypto symbol."""
+    """TradingView lightweight candlestick charts ke liye historical candles provide karta hai."""
     quote = quote_for_asset(symbol, asset_type)
     if quote is None:
         return jsonify({"ok": False, "message": "Symbol not found."}), 404
@@ -980,7 +1008,7 @@ def chart_data(asset_type, symbol):
 @app.get("/api/portfolio/summary")
 @login_required
 def portfolio_summary_api():
-    """Expose a portfolio summary with dual-currency breakdown for client-side refreshes."""
+    """Client-side automatic refresh ke liye live portfolio summary data provide karta hai."""
     portfolio = calculate_portfolio(session["user_id"], quote_for_asset)
     return jsonify(
         {
@@ -1000,7 +1028,7 @@ def portfolio_summary_api():
 @app.get("/api/quote/<asset_type>/<symbol>")
 @login_required
 def quote_api(asset_type, symbol):
-    """Return the freshest live quote for an individual asset."""
+    """Kisi single asset ka latest refreshed quote return karta hai."""
     quote = quote_for_asset(symbol, asset_type)
     if quote is None:
         return jsonify({"ok": False, "message": "Symbol not found."}), 404
@@ -1010,25 +1038,15 @@ def quote_api(asset_type, symbol):
 @app.get("/api/market/quotes")
 @login_required
 def market_quotes_api():
-    """Return latest refreshed quotes for all stocks and cryptos."""
+    """Sabhi Indian & US stocks aur cryptos ke fresh market quotes return karta hai."""
     stocks = list_stocks()
     cryptos = list_crypto()
     return jsonify({"ok": True, "stocks": stocks, "crypto": cryptos})
 
 
-@app.get("/api/timeline")
-@login_required
-def timeline_api():
-    """Return closed trade lifecycle records and duration statistics in JSON."""
-    user_id = session["user_id"]
-    trades = [dict(r) for r in get_closed_trades(user_id, limit=100)]
-    stats = get_trade_timeline_stats(user_id)
-    return jsonify({"ok": True, "trades": trades, "stats": stats})
-
-
 @app.get("/api/icon/<asset_type>/<symbol>")
 def icon_api(asset_type, symbol):
-    """Return SVG vector markup for dynamic client-side rendering."""
+    """Kisi bhi company ya cryptocurrency ka crisp official SVG vector icon return karta hai."""
     size = int(request.args.get("size", 32))
     svg = str(get_asset_svg(symbol, asset_type, size=size))
     return jsonify({"ok": True, "symbol": symbol, "svg": svg})

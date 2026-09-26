@@ -1,21 +1,34 @@
+"""
+TradeVerse - SQLite Database Layer & Data Engine
+========================================================================================
+Yeh file TradeVerse ke poore database management, table schemas, virtual wallets,
+order execution (BUY/SELL), closed trades, learning quiz aur serverless state restoration
+ko handle karti hai.
+========================================================================================
+"""
+
 import json
 import os
+from pathlib import Path
 import shutil
 import sqlite3
 import sys
 from contextlib import closing
 from datetime import datetime
-from pathlib import Path
 
 from werkzeug.security import generate_password_hash
 
-
+# ==============================================================================
+# SECTION 1: DATABASE ENVIRONMENT & PATH RESOLUTION
+# Vercel serverless environment me read-only filesystem hoti hai, isliye
+# writable database ko /tmp/tradeverse.db me seed DB se copy kiya jata hai.
+# ==============================================================================
 BASE_DIRECTORY = Path(__file__).resolve().parent
 SEED_DATABASE_PATH = BASE_DIRECTORY / "database" / "tradeverse.db"
 
 
 def is_serverless_env():
-    """Determine if running in Vercel or a read-only serverless container."""
+    """Check karta hai ki code Vercel ya AWS Lambda serverless environment me chal raha hai ya nahi."""
     if os.environ.get("VERCEL") or os.environ.get("VERCEL_ENV") or os.environ.get("AWS_LAMBDA_FUNCTION_NAME"):
         return True
     try:
@@ -219,8 +232,13 @@ def _migrate_database(connection):
 
 
 
+# ==============================================================================
+# SECTION 2: SCHEMA INITIALIZATION & TABLES SETUP
+# SQLite tables (users, wallet, portfolio, transactions, closed_trades, watchlist,
+# learning_modules, quiz) create aur verify karta hai.
+# ==============================================================================
 def init_database():
-    """Create the normalized application tables and seed reusable learning data."""
+    """Application tables create karta hai aur initial learning data seed karta hai."""
     try:
         _init_database_tables()
     except Exception as err:
@@ -462,8 +480,13 @@ def _seed_quiz_questions(connection):
     )
 
 
+# ==============================================================================
+# SECTION 3: USER MANAGEMENT & SERVERLESS AUTO-RECOVERY
+# Naye users register karna, hashed password verify karna, aur wiped container me
+# credentials/session se user account + starting credits restore karna.
+# ==============================================================================
 def create_user(full_name, email, password):
-    """Create a user and a starting virtual wallet, returning the new user id."""
+    """Naya user account aur starting virtual wallet (₹10,00,000 INR & 10,000 USDT) create karta hai."""
     password_hash = generate_password_hash(password)
     with closing(get_connection()) as connection:
         try:
@@ -725,8 +748,14 @@ def reset_password(email, new_password):
             return False
 
 
+# ==============================================================================
+# SECTION 4: DUAL-CURRENCY VIRTUAL WALLET & CURRENCY ROUTING
+# Virtual cash balance (INR aur USDT) retrieve aur manage karta hai, aur asset
+# symbol ke hisaab se correct currency (Indian Stock = INR, US Stock/Crypto = USDT)
+# decide karta hai.
+# ==============================================================================
 def get_wallet(user_id):
-    """Return a user's current paper-credit balances for both INR and USDT."""
+    """User ke dono virtual practice balances (INR aur USDT) return karta hai."""
     with closing(get_connection()) as connection:
         row = connection.execute(
             "SELECT inr_balance, usdt_balance, cash_balance FROM wallet WHERE user_id = ?", (user_id,)
@@ -739,7 +768,7 @@ def get_wallet(user_id):
 
 
 def get_currency_for_asset(symbol, asset_type):
-    """Determine whether an asset is traded in INR or USDT."""
+    """Asset type aur ticker symbol ke adhar par currency ('INR' ya 'USDT') return karta hai."""
     if asset_type == "crypto":
         return "USDT"
     upper_symbol = symbol.upper().strip()
@@ -750,8 +779,13 @@ def get_currency_for_asset(symbol, asset_type):
     return "USDT"
 
 
+# ==============================================================================
+# SECTION 5: PORTFOLIO & POSITION TRACKING
+# Active open positions, closed trades lifecycle, portfolio performance metrics,
+# aur recent ledger transactions fetch karta hai.
+# ==============================================================================
 def get_portfolio_rows(user_id):
-    """Return all current holdings for a user with calculated position age."""
+    """User ki sari open holdings position age (duration) ke saath fetch karta hai."""
     with closing(get_connection()) as connection:
         return connection.execute(
             """SELECT *,
@@ -827,8 +861,16 @@ def get_transactions(user_id, limit=20):
         ).fetchall()
 
 
+# ==============================================================================
+# SECTION 6: TRADING ENGINE & ORDER EXECUTION
+# BUY aur SELL orders ko atomically execute karta hai:
+# - Virtual wallet balance verify & deduct/credit karta hai (INR ya USDT)
+# - Portfolio holdings ko weighted average price ke sath update karta hai
+# - SELL hone par realized P&L calculate karke closed_trades me record karta hai
+# - Transactions audit ledger me entry create karta hai
+# ==============================================================================
 def execute_trade(user_id, symbol, asset_type, asset_name, side, quantity, price):
-    """Atomically apply a BUY or SELL order to the wallet, portfolio, ledger, and closed_trades timeline."""
+    """BUY ya SELL order ko atomic transaction me execute karta hai."""
     normalized_symbol = symbol.upper().strip()
     normalized_side = side.upper().strip()
     quantity = float(quantity)
@@ -1010,8 +1052,12 @@ def execute_trade(user_id, symbol, asset_type, asset_name, side, quantity, price
 
 
 
+# ==============================================================================
+# SECTION 7: WATCHLIST OPERATIONS
+# User ke pasandida stocks aur crypto assets ko watchlist me save/remove/toggle karta hai.
+# ==============================================================================
 def get_watchlist(user_id):
-    """Return a user's saved market symbols in reverse-added order."""
+    """User ke saved watchlist assets fetch karta hai."""
     with closing(get_connection()) as connection:
         return connection.execute(
             "SELECT * FROM watchlist WHERE user_id = ? ORDER BY created_at DESC, id DESC",
@@ -1020,7 +1066,7 @@ def get_watchlist(user_id):
 
 
 def is_watchlist_item(user_id, symbol, asset_type):
-    """Check whether a symbol is already saved for one user and asset type."""
+    """Check karta hai ki asset user ke watchlist me already maujood hai ya nahi."""
     normalized_symbol = symbol.upper().strip()
     with closing(get_connection()) as connection:
         return connection.execute(
@@ -1031,7 +1077,7 @@ def is_watchlist_item(user_id, symbol, asset_type):
 
 
 def add_watchlist_item(user_id, symbol, asset_type):
-    """Save a symbol once and return False instead of creating a duplicate row."""
+    """Asset ko watchlist me add karta hai (duplicate error se bach kar)."""
     normalized_symbol = symbol.upper().strip()
     if asset_type not in {"stock", "crypto"}:
         raise ValueError("This asset type cannot be saved to the watchlist.")
@@ -1049,7 +1095,7 @@ def add_watchlist_item(user_id, symbol, asset_type):
 
 
 def remove_watchlist_item(user_id, symbol, asset_type):
-    """Remove one user's saved symbol without affecting another user's list."""
+    """Asset ko user ke watchlist se remove karta hai."""
     normalized_symbol = symbol.upper().strip()
     with closing(get_connection()) as connection:
         cursor = connection.execute(
@@ -1062,7 +1108,7 @@ def remove_watchlist_item(user_id, symbol, asset_type):
 
 
 def toggle_watchlist_item(user_id, symbol, asset_type):
-    """Add a symbol to the watchlist or remove it when it is already saved."""
+    """Watchlist me item toggle karta hai: Agar hai to remove, nahi hai to add."""
     normalized_symbol = symbol.upper().strip()
     if is_watchlist_item(user_id, normalized_symbol, asset_type):
         remove_watchlist_item(user_id, normalized_symbol, asset_type)
@@ -1070,8 +1116,13 @@ def toggle_watchlist_item(user_id, symbol, asset_type):
     return add_watchlist_item(user_id, normalized_symbol, asset_type)
 
 
+# ==============================================================================
+# SECTION 8: LEARNING MODULES & QUIZ SYSTEM
+# Trading education articles provide karta hai, interactive weekly quiz serve karta hai,
+# aur user answers verify karke score & results database me store karta hai.
+# ==============================================================================
 def get_learning_modules():
-    """Return the complete beginner-friendly course list."""
+    """Beginner-friendly learning articles list return karta hai."""
     with closing(get_connection()) as connection:
         return connection.execute("SELECT * FROM learning_modules ORDER BY id").fetchall()
 

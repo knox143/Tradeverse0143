@@ -1,4 +1,18 @@
-"""Stock quote helpers with live real-time feeds, caching, and fallback adapters."""
+"""
+TradeVerse - Stock Market API Engine
+====================================
+Is module me stocks ke live market quotes, historical candlestick data, aur search/listing
+functions implement kiye gaye hain.
+
+APIs & Free Tier Note:
+- Primary Free Feed: Yahoo Finance v8 Chart API (Free, zero API key required).
+  * Note: Free market data feeds me 10-15 minute ka standard exchange delay hota hai.
+- Optional Pro Feeds:
+  * Twelve Data (Set TWELVE_DATA_API_KEY in .env or Vercel Environment Variables).
+  * Finnhub (Set FINNHUB_API_KEY in .env or Vercel Environment Variables).
+- In-memory Caching: In-memory cache (_stock_cache) redundant API requests ko rokti hai
+  aur API rate limits ko protect karti hai.
+"""
 
 import json
 import os
@@ -6,13 +20,20 @@ import time
 from datetime import date, datetime, timedelta
 import requests
 
+# Fast pooled HTTP session for low latency
 _stock_session = requests.Session()
-_stock_session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"})
+_stock_session.headers.update({
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+})
 
 # In-memory quote cache: symbol -> {"data": quote_dict, "ts": float}
 _stock_cache = {}
 _candle_cache = {}
 
+# ==============================================================================
+# SECTION 1: DEFAULT STOCKS & BASELINE DATA
+# Indian (NSE) stocks INR me aur Global (US) stocks USDT me configure hain.
+# ==============================================================================
 STOCKS = [
     {"symbol": "RELIANCE.NS", "name": "Reliance Industries", "market": "India", "currency": "INR", "price": 1257.50, "change": 0.84, "sector": "Energy"},
     {"symbol": "TCS.NS", "name": "Tata Consultancy Services", "market": "India", "currency": "INR", "price": 3920.00, "change": -0.31, "sector": "Technology"},
@@ -31,14 +52,18 @@ STOCKS = [
 
 
 def _get_cache_ttl():
+    """Cache TTL seconds return karta hai (Default: 60s)."""
     try:
         return int(os.environ.get("PRICE_CACHE_TTL_SECONDS") or 60)
     except (ValueError, TypeError):
         return 60
 
 
+# ==============================================================================
+# SECTION 2: LIVE QUOTE FETCHERS (FREE & EXTERNAL APIS)
+# ==============================================================================
 def _fetch_yahoo_quote(symbol):
-    """Fetch live quote from Yahoo Finance API with strict timeout."""
+    """Yahoo Finance API se quote lata hai (Free, no API key needed, ~10-15 min delay)."""
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=1d&range=1d"
     try:
         resp = _stock_session.get(url, timeout=(2.5, 3.0))
@@ -132,8 +157,13 @@ def _get_finnhub_quote(symbol, api_key):
         return None
 
 
+# ==============================================================================
+# SECTION 3: QUOTE RESOLVER & IN-MEMORY CACHE
+# Pehle memory cache check karta hai, fir external provider (Yahoo/Twelve/Finnhub),
+# aur agar network down ho to safe baseline data return karta hai.
+# ==============================================================================
 def get_stock_quote(symbol):
-    """Return live real-time quote, checking cache, external providers, and local fallback."""
+    """Stock ka latest quote fetch karta hai (Cache -> Live API -> Fallback)."""
     normalized_symbol = symbol.upper().strip()
 
     # 1. Check in-memory cache
@@ -180,8 +210,12 @@ def get_stock_quote(symbol):
     return None
 
 
+# ==============================================================================
+# SECTION 4: CONCURRENT STOCK LISTING & SEARCH
+# ThreadPoolExecutor ka use karke stocks ko parallel me live price se update karta hai.
+# ==============================================================================
 def list_stocks(query="", market="All"):
-    """Return stock records refreshed concurrently with latest real-time prices."""
+    """Search query aur market filter ke anusar parallel me updated stock list return karta hai."""
     from concurrent.futures import ThreadPoolExecutor
 
     normalized_query = query.lower().strip()
@@ -211,8 +245,13 @@ def list_stocks(query="", market="All"):
         return list(executor.map(_refresh, filtered))
 
 
+# ==============================================================================
+# SECTION 5: HISTORICAL CANDLESTICK GENERATOR
+# Real historical OHLC candles (Yahoo Finance) lata hai ya offline realistic
+# calibrated candles generate karta hai.
+# ==============================================================================
 def generate_candles(symbol, current_price, days=45):
-    """Fetch real historical candlestick data or fallback to calibrated generator."""
+    """Historical candlestick OHLC data fetch ya generate karta hai."""
     cached = _candle_cache.get(symbol)
     now = time.time()
     if cached and (now - cached["ts"] < 300):
@@ -266,7 +305,10 @@ def generate_candles(symbol, current_price, days=45):
     return fallback_candles
 
 
-# Vercel serverless fallback handler
+# ==============================================================================
+# SECTION 6: VERCEL SERVERLESS EXPORT
+# Vercel serverless function entrypoint.
+# ==============================================================================
 def handler(*args, **kwargs):
     from app import app
     return app(*args, **kwargs)

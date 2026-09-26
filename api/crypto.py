@@ -1,18 +1,36 @@
-"""Crypto quote helpers with live real-time feeds, caching, and fallback adapters."""
+"""
+TradeVerse - Cryptocurrency API Engine
+======================================
+Is module me top crypto assets (BTC, ETH, SOL, etc.) ke real-time ticker prices,
+intraday/multi-timeframe candlestick data, aur search/listing functions implement hain.
+
+APIs & Free Tier Note:
+- Primary Free Feed: Binance Public Ticker API (Tick-by-tick real-time quotes, free).
+- Secondary Free Fallback: CoinGecko Public Markets API.
+  * Optional: Set COINGECKO_API_KEY in .env or Vercel Environment Variables.
+- In-memory Caching: In-memory cache (_crypto_cache) frequent redundant requests ko
+  cache karke API rate limits ko protect karta hai.
+"""
 
 import os
 import time
 from datetime import date, datetime, timedelta
 import requests
 
+# Fast pooled HTTP session for low latency
 _crypto_session = requests.Session()
-_crypto_session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"})
+_crypto_session.headers.update({
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+})
 
 # In-memory quote cache: symbol -> {"data": quote_dict, "ts": float}
 _crypto_cache = {}
 _crypto_candle_cache = {}
 
-# Starter / fallback crypto assets
+# ==============================================================================
+# SECTION 1: DEFAULT CRYPTO ASSETS & BASELINE DATA
+# Top cryptocurrency baseline pairs (All denominated in USDT).
+# ==============================================================================
 CRYPTO = [
     {"symbol": "BTC", "coin_id": "bitcoin", "name": "Bitcoin", "currency": "USDT", "price": 86_500.00, "change": 1.86, "rank": 1},
     {"symbol": "ETH", "coin_id": "ethereum", "name": "Ethereum", "currency": "USDT", "price": 3_250.00, "change": 0.73, "rank": 2},
@@ -26,14 +44,18 @@ CRYPTO = [
 
 
 def _get_cache_ttl():
+    """Cache TTL seconds return karta hai (Default: 60s)."""
     try:
         return int(os.environ.get("PRICE_CACHE_TTL_SECONDS") or 60)
     except (ValueError, TypeError):
         return 60
 
 
+# ==============================================================================
+# SECTION 2: LIVE QUOTE FETCHERS (BINANCE & COINGECKO)
+# ==============================================================================
 def _fetch_binance_quote(symbol):
-    """Retrieve real-time 24hr ticker from Binance API with fast pooled HTTP."""
+    """Binance Public API se real-time 24hr ticker data lata hai."""
     ticker_sym = f"{symbol.upper()}USDT"
     endpoint = f"https://api.binance.com/api/v3/ticker/24hr?symbol={ticker_sym}"
     try:
@@ -91,8 +113,13 @@ def _get_coingecko_quote(coin_id):
         return None
 
 
+# ==============================================================================
+# SECTION 3: CRYPTO QUOTE RESOLVER & IN-MEMORY CACHE
+# Pehle cache check karta hai, fir Binance live price, fir CoinGecko fallback,
+# aur offline hone par baseline data safely provide karta hai.
+# ==============================================================================
 def get_crypto_quote(symbol):
-    """Return live real-time crypto quote, checking cache, Binance, CoinGecko, and fallback."""
+    """Crypto pair ka real-time quote fetch karta hai (Cache -> Binance -> CoinGecko -> Fallback)."""
     normalized_symbol = symbol.upper().strip()
 
     # 1. Check in-memory cache
@@ -137,8 +164,12 @@ def get_crypto_quote(symbol):
     return None
 
 
+# ==============================================================================
+# SECTION 4: CONCURRENT CRYPTO MARKET LISTING
+# Crypto assets ko parallel me latest prices se update karta hai.
+# ==============================================================================
 def list_crypto(query=""):
-    """Return the crypto market list refreshed concurrently with latest real-time prices."""
+    """Query filter ke adhar par refreshed crypto assets list return karta hai."""
     from concurrent.futures import ThreadPoolExecutor
 
     normalized_query = query.lower().strip()
@@ -167,8 +198,13 @@ def list_crypto(query=""):
         return list(executor.map(_refresh, filtered))
 
 
+# ==============================================================================
+# SECTION 5: MULTI-TIMEFRAME CANDLESTICK GENERATOR (BINANCE KLINES)
+# Binance API se 1m se lekar 5y tak real klines lata hai ya realistic offline
+# candles generate karta hai.
+# ==============================================================================
 def generate_crypto_candles(symbol, current_price, timeframe="5y", days=None):
-    """Fetch real historical candlestick data from Binance or fallback to calibrated generator."""
+    """Crypto candlestick OHLC data fetch ya generate karta hai."""
     tf_raw = (timeframe or "5y").strip()
     if tf_raw in ("1M", "1mo", "1month"):
         tf = "1mo"
@@ -293,7 +329,10 @@ def generate_crypto_candles(symbol, current_price, timeframe="5y", days=None):
     return candles
 
 
-# Vercel serverless fallback handler
+# ==============================================================================
+# SECTION 6: VERCEL SERVERLESS EXPORT
+# Vercel serverless function entrypoint.
+# ==============================================================================
 def handler(*args, **kwargs):
     from app import app
     return app(*args, **kwargs)

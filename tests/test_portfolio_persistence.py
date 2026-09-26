@@ -23,9 +23,12 @@ from database import (
 def run_checks():
     client = app.test_client()
 
-    # 1. Register test user
+    # Clean up test user if previously left in DB
     email = "persistent_trader@example.com"
     pwd = "TraderPassword123!"
+    with sqlite3.connect(str(get_database_path())) as conn:
+        conn.execute("DELETE FROM users WHERE email = ?", (email,))
+        conn.commit()
     res_reg = client.post(
         "/register",
         data={
