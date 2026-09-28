@@ -57,6 +57,17 @@
         We sent a 4-digit verification code to <strong>{{ pending_email }}</strong>.<br>
         Please enter the code below to complete your registration and unlock your virtual trading wallet.
     </p>
+
+    {% if dev_otp %}
+    <div style="background: rgba(0, 125, 112, 0.08); border: 1px dashed var(--teal); border-radius: 8px; padding: 14px 18px; margin: 18px 0 14px 0; text-align: center;">
+        <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--teal); font-weight: 700; margin-bottom: 4px;">
+            <i data-lucide="info" style="width: 14px; height: 14px; vertical-align: middle; margin-right: 4px;"></i> Demo / Practice Mode Active
+        </div>
+        <p style="font-size: 13px; color: var(--muted); margin: 0 0 6px 0;">SMTP credentials abhi Vercel par configured nahi hain. Testing ke liye aapka OTP code ye hai:</p>
+        <div style="font-size: 30px; font-weight: 800; letter-spacing: 10px; color: var(--forest); font-family: 'DM Mono', monospace;">{{ dev_otp }}</div>
+    </div>
+    {% endif %}
+
     <form method="post" action="{{ url_for('verify_otp') }}" class="auth-form" id="otp-form" novalidate>
         <label class="field-label" for="otp">4-Digit Verification Code</label>
         <div style="position: relative; margin-bottom: 8px;">

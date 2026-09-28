@@ -326,7 +326,7 @@ def register():
                 otp = engine.generate_otp()
                 send_res = engine.send_otp_email(email, otp, full_name=name)
 
-                # Store pending registration in signed session with 10-minute expiry
+                is_dev = bool(send_res.get("dev_mode"))
                 session["pending_signup"] = {
                     "full_name": name,
                     "email": email,
@@ -334,12 +334,13 @@ def register():
                     "otp": otp,
                     "created_at": time.time(),
                     "expires_at": time.time() + 600,
+                    "dev_mode": is_dev,
                 }
 
-                if send_res.get("dev_mode"):
-                    flash(f"4-digit OTP sent to {email}! (Dev Code: {otp} — add Gmail SMTP credentials to send live emails)", "info")
+                if is_dev:
+                    flash(f"4-digit OTP generated for {email}! (Demo / Test Code: {otp})", "info")
                 else:
-                    flash(f"4-digit verification code sent to {email}. Please enter it below to activate your account.", "success")
+                    flash(f"4-digit verification code sent to {email}. Please check your inbox or spam folder.", "success")
 
                 return redirect(url_for("verify_otp"))
 
@@ -363,18 +364,20 @@ def verify_otp():
         flash("No pending registration found. Please fill the registration form.", "error")
         return redirect(url_for("register"))
 
+    dev_otp = pending.get("otp") if pending.get("dev_mode") else None
+
     if request.method == "POST":
         user_otp = request.form.get("otp", "").strip()
 
         # Check OTP expiry (10 minutes)
         if time.time() > pending.get("expires_at", 0):
             flash("Verification code has expired. Please click Resend OTP to get a new code.", "error")
-            return render_template("auth.html", mode="verify_otp", pending_email=pending["email"], page_name="Verify Email")
+            return render_template("auth.html", mode="verify_otp", pending_email=pending["email"], dev_otp=dev_otp, page_name="Verify Email")
 
         # Check OTP match
         if user_otp != str(pending.get("otp")):
             flash("Invalid 4-digit verification code. Please check your email and try again.", "error")
-            return render_template("auth.html", mode="verify_otp", pending_email=pending["email"], page_name="Verify Email")
+            return render_template("auth.html", mode="verify_otp", pending_email=pending["email"], dev_otp=dev_otp, page_name="Verify Email")
 
         # OTP is valid! Create account in database now
         try:
@@ -407,7 +410,7 @@ def verify_otp():
             flash(str(err), "error")
             return redirect(url_for("register"))
 
-    return render_template("auth.html", mode="verify_otp", pending_email=pending["email"], page_name="Verify Email")
+    return render_template("auth.html", mode="verify_otp", pending_email=pending["email"], dev_otp=dev_otp, page_name="Verify Email")
 
 
 @app.route("/resend-otp")
@@ -426,13 +429,15 @@ def resend_otp():
     new_otp = engine.generate_otp()
     pending["otp"] = new_otp
     pending["expires_at"] = time.time() + 600
-    session["pending_signup"] = pending
 
     send_res = engine.send_otp_email(pending["email"], new_otp, full_name=pending["full_name"])
-    if send_res.get("dev_mode"):
-        flash(f"New 4-digit OTP sent to {pending['email']}! (Dev Code: {new_otp})", "info")
+    pending["dev_mode"] = bool(send_res.get("dev_mode"))
+    session["pending_signup"] = pending
+
+    if pending["dev_mode"]:
+        flash(f"New 4-digit OTP generated for {pending['email']}! (Demo / Test Code: {new_otp})", "info")
     else:
-        flash(f"A new 4-digit verification code has been sent to {pending['email']}.", "success")
+        flash(f"A new 4-digit verification code has been sent to {pending['email']}. Please check your inbox or spam folder.", "success")
 
     return redirect(url_for("verify_otp"))
 

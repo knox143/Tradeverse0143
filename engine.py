@@ -370,10 +370,12 @@ def send_otp_email(to_email, otp, full_name="Trader"):
 </html>"""
 
     if smtp_user and smtp_pass:
+        clean_pass = str(smtp_pass).replace(" ", "").strip()
+        clean_user = str(smtp_user).strip()
         try:
             msg = MIMEMultipart("alternative")
             msg["Subject"] = subject
-            msg["From"] = f"TradeVerse <{smtp_user}>"
+            msg["From"] = f"TradeVerse <{clean_user}>"
             msg["To"] = to_email
 
             text_part = MIMEText(f"Your TradeVerse verification code is: {otp}\nValid for 10 minutes.", "plain")
@@ -381,13 +383,22 @@ def send_otp_email(to_email, otp, full_name="Trader"):
             msg.attach(text_part)
             msg.attach(html_part)
 
-            with smtplib.SMTP(smtp_server, smtp_port, timeout=10) as server:
-                server.starttls()
-                server.login(smtp_user, smtp_pass)
-                server.send_message(msg)
-            return {"sent": True, "dev_mode": False}
+            # Try Port 465 SSL first (most reliable on Vercel/serverless environments)
+            try:
+                with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=7) as server:
+                    server.login(clean_user, clean_pass)
+                    server.send_message(msg)
+                return {"sent": True, "dev_mode": False}
+            except Exception as e_ssl:
+                logger.warning(f"SMTP SSL 465 attempt: {e_ssl}, trying port 587 STARTTLS...")
+                # Fallback to Port 587 STARTTLS
+                with smtplib.SMTP(smtp_server, smtp_port, timeout=7) as server:
+                    server.starttls()
+                    server.login(clean_user, clean_pass)
+                    server.send_message(msg)
+                return {"sent": True, "dev_mode": False}
         except Exception as e:
-            logger.warning(f"SMTP send failed: {e}. Falling back to dev mode OTP.")
+            logger.warning(f"SMTP delivery failed ({e}). Falling back to dev mode OTP.")
             return {"sent": True, "dev_mode": True, "otp": otp, "error": str(e)}
     else:
         logger.info(f"[TradeVerse OTP] Verification code for {to_email}: {otp}")
