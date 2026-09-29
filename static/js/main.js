@@ -350,7 +350,12 @@
                     horzLines: { color: "#edf1ef" },
                 },
                 rightPriceScale: { borderColor: "#d9e2dd" },
-                timeScale: { borderColor: "#d9e2dd", timeVisible: true },
+                timeScale: {
+                    borderColor: "#d9e2dd",
+                    timeVisible: true,
+                    barSpacing: 12,
+                    minBarSpacing: 5,
+                },
                 crosshair: {
                     vertLine: { color: "#007d70", style: 2 },
                     horzLine: { color: "#007d70", style: 2 },
@@ -360,9 +365,12 @@
             const series = chart.addCandlestickSeries({
                 upColor: "#078263",
                 downColor: "#c94d3d",
-                borderVisible: false,
+                borderVisible: true,
+                borderUpColor: "#078263",
+                borderDownColor: "#c94d3d",
                 wickUpColor: "#078263",
                 wickDownColor: "#c94d3d",
+                wickVisible: true,
             });
 
             series.setData(result.candles);
@@ -589,7 +597,17 @@
                     const label = tab.dataset.label || `${symbol} Candlesticks`;
                     if (titleElem) titleElem.textContent = label;
                     if (legendElem) {
-                        legendElem.innerHTML = `<span><i class="legend-win"></i>Bullish</span> <span style="margin-left:8px;"><i class="legend-loss"></i>Bearish</span>`;
+                        legendElem.innerHTML = `
+                        <div class="chart-legend-patterns">
+                            <span class="candle-pattern-badge bullish-pattern" style="padding: 3px 8px;">
+                                <svg width="12" height="16" viewBox="0 0 14 20" fill="none"><line x1="7" y1="1" x2="7" y2="19" stroke="#078263" stroke-width="2"/><rect x="2.5" y="5" width="9" height="10" rx="1.5" fill="#078263"/></svg>
+                                <span class="pattern-text"><strong>▲ Up Candle</strong><small>Bullish</small></span>
+                            </span>
+                            <span class="candle-pattern-badge bearish-pattern" style="padding: 3px 8px;">
+                                <svg width="12" height="16" viewBox="0 0 14 20" fill="none"><line x1="7" y1="1" x2="7" y2="19" stroke="#c94d3d" stroke-width="2"/><rect x="2.5" y="5" width="9" height="10" rx="1.5" fill="#c94d3d"/></svg>
+                                <span class="pattern-text"><strong>▼ Down Candle</strong><small>Bearish</small></span>
+                            </span>
+                        </div>`;
                     }
                     if (footLeftElem) footLeftElem.textContent = `Daily Candlestick OHLCV Chart for ${symbol}`;
                     renderCandlestickChart(canvas, assetType, symbol);
@@ -793,6 +811,26 @@
                 initializePortfolioChart(canvas);
             }
         });
+
+        // Setup Portfolio Holdings category tabs
+        const holdingsTabs = document.querySelectorAll("[data-holdings-filter]");
+        if (holdingsTabs.length > 0) {
+            holdingsTabs.forEach((tab) => {
+                tab.addEventListener("click", () => {
+                    holdingsTabs.forEach((t) => t.classList.remove("is-active"));
+                    tab.classList.add("is-active");
+                    const filter = tab.dataset.holdingsFilter;
+                    document.querySelectorAll(".holdings-table tbody tr").forEach((row) => {
+                        const cat = row.dataset.holdingCategory || "all";
+                        if (filter === "all" || cat === filter) {
+                            row.style.display = "";
+                        } else {
+                            row.style.display = "none";
+                        }
+                    });
+                });
+            });
+        }
 
         const menuButton = document.querySelector("[data-menu-toggle]");
         const sidebar = document.querySelector(".sidebar");

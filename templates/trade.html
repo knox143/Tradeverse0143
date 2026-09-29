@@ -3,21 +3,69 @@
 {% block content %}
 <section class="market-page-intro">
     <div>
-        <p class="eyebrow">{% if active_tab == 'crypto' %}Digital assets &bull; USDT{% else %}Equities market &bull; Dual Currency (₹ INR & USDT){% endif %}</p>
-        <h2>{% if active_tab == 'crypto' %}Crypto Market & Chart Studio{% else %}Indian & Global Stocks Studio{% endif %}</h2>
-        <p>{% if active_tab == 'crypto' %}Live real-time crypto prices in USDT. Quotes from Binance & CoinGecko feeds.{% else %}Indian Stock Market (NSE in ₹ INR) and Global Equities (USDT). Quotes powered by free tier feeds with 10–15m exchange delay.{% endif %}</p>
+        <p class="eyebrow">
+            {% if active_tab == 'crypto' %}
+                Digital assets &bull; USDT
+            {% elif selected_market == 'India' %}
+                Indian Equities Market &bull; NSE (₹ INR)
+            {% elif selected_market == 'Global' %}
+                Global Equities Market &bull; US Equities (USDT)
+            {% else %}
+                Equities Market &bull; Dual Currency (₹ INR & USDT)
+            {% endif %}
+        </p>
+        <h2>
+            {% if active_tab == 'crypto' %}
+                Crypto Market & Candlestick Studio
+            {% elif selected_market == 'India' %}
+                🇮🇳 Indian Stocks Market (NSE &bull; ₹ INR)
+            {% elif selected_market == 'Global' %}
+                🌐 Global Stocks Market (US &bull; USDT)
+            {% else %}
+                Indian & Global Stocks Studio
+            {% endif %}
+        </h2>
+        <p>
+            {% if active_tab == 'crypto' %}
+                Live real-time crypto prices in USDT with full candlestick patterns. Quotes powered by Binance & CoinGecko feeds.
+            {% elif selected_market == 'India' %}
+                Top National Stock Exchange (NSE) Indian shares priced in ₹ INR. Full daily OHLC candlestick patterns with 10–15m exchange delay.
+            {% elif selected_market == 'Global' %}
+                Top US & Global tech equities priced in USDT. Full daily OHLC candlestick patterns with 10–15m exchange delay.
+            {% else %}
+                Indian Stock Market (NSE in ₹ INR) and Global Equities (USDT) separated into dedicated categories.
+            {% endif %}
+        </p>
     </div>
     <span class="data-label" title="Quotes from free exchange feeds (10–15 minutes delayed)"><i data-lucide="clock"></i>Free Tier Feed &bull; 10–15m Delayed</span>
 </section>
 
-<!-- Market Switcher Tabs -->
+<!-- Market Switcher Tabs (Indian Stocks, Global Stocks, All Stocks, Crypto Market) -->
 <div class="dash-chart-tabs" style="margin-bottom: 24px;">
-    <a href="{{ url_for('stocks') }}" class="dash-chart-tab {% if active_tab != 'crypto' %}is-active{% endif %}">
-        <i data-lucide="landmark"></i>Stocks (NSE & US)
+    {% if active_tab != 'crypto' %}
+    <a href="{{ url_for('stocks', market='India') }}" class="dash-chart-tab {% if selected_market == 'India' %}is-active{% endif %}">
+        <i data-lucide="landmark"></i>🇮🇳 Indian Stocks (NSE ₹)
     </a>
-    <a href="{{ url_for('crypto') }}" class="dash-chart-tab {% if active_tab == 'crypto' %}is-active{% endif %}">
-        <i data-lucide="bitcoin"></i>Crypto Market
+    <a href="{{ url_for('stocks', market='Global') }}" class="dash-chart-tab {% if selected_market == 'Global' %}is-active{% endif %}">
+        <i data-lucide="globe"></i>🌐 Global Stocks (USDT)
     </a>
+    <a href="{{ url_for('stocks', market='All') }}" class="dash-chart-tab {% if selected_market == 'All' %}is-active{% endif %}">
+        <i data-lucide="layers"></i>All Stocks
+    </a>
+    <a href="{{ url_for('crypto') }}" class="dash-chart-tab">
+        <i data-lucide="bitcoin"></i>🪙 Crypto Market
+    </a>
+    {% else %}
+    <a href="{{ url_for('stocks', market='India') }}" class="dash-chart-tab">
+        <i data-lucide="landmark"></i>🇮🇳 Indian Stocks (NSE ₹)
+    </a>
+    <a href="{{ url_for('stocks', market='Global') }}" class="dash-chart-tab">
+        <i data-lucide="globe"></i>🌐 Global Stocks (USDT)
+    </a>
+    <a href="{{ url_for('crypto') }}" class="dash-chart-tab is-active">
+        <i data-lucide="bitcoin"></i>🪙 Crypto Market
+    </a>
+    {% endif %}
 </div>
 
 {% if active_tab == 'crypto' %}
@@ -29,9 +77,28 @@
             <h2>Coin Candlestick Studio</h2>
             <p>Select any cryptocurrency below to inspect its real-time candlestick chart powered by Binance.</p>
         </div>
-        <div class="chart-legend">
-            <span><i class="legend-win"></i>Bullish Candle</span>
-            <span style="margin-left:8px;"><i class="legend-loss"></i>Bearish Candle</span>
+        <!-- Authentic Candlestick Pattern Legend -->
+        <div class="chart-legend-patterns">
+            <div class="candle-pattern-badge bullish-pattern" title="Bullish Up Candle: Close > Open (Buyers Dominant)">
+                <svg width="14" height="20" viewBox="0 0 14 20" fill="none" class="candle-icon">
+                    <line x1="7" y1="1" x2="7" y2="19" stroke="#078263" stroke-width="1.8" stroke-linecap="round"/>
+                    <rect x="2.5" y="5" width="9" height="10" rx="1.5" fill="#078263" stroke="#04634b" stroke-width="1"/>
+                </svg>
+                <span class="pattern-text">
+                    <strong>▲ Up Candle</strong>
+                    <small>Bullish Pattern</small>
+                </span>
+            </div>
+            <div class="candle-pattern-badge bearish-pattern" title="Bearish Down Candle: Open > Close (Sellers Dominant)">
+                <svg width="14" height="20" viewBox="0 0 14 20" fill="none" class="candle-icon">
+                    <line x1="7" y1="1" x2="7" y2="19" stroke="#c94d3d" stroke-width="1.8" stroke-linecap="round"/>
+                    <rect x="2.5" y="5" width="9" height="10" rx="1.5" fill="#c94d3d" stroke="#a33628" stroke-width="1"/>
+                </svg>
+                <span class="pattern-text">
+                    <strong>▼ Down Candle</strong>
+                    <small>Bearish Pattern</small>
+                </span>
+            </div>
         </div>
     </div>
 
@@ -87,13 +154,48 @@
     <div class="section-heading">
         <div>
             <p class="eyebrow">Technical Analysis</p>
-            <h2>Stock Candlestick Studio</h2>
+            <h2>
+                {% if selected_market == 'India' %}
+                    🇮🇳 Indian Stock Candlestick Studio (NSE ₹)
+                {% elif selected_market == 'Global' %}
+                    🌐 Global Equities Candlestick Studio (USDT)
+                {% else %}
+                    Stock Candlestick Studio (Indian &amp; Global)
+                {% endif %}
+            </h2>
             <p>Inspect real-time daily candlestick patterns for Indian NSE stocks (INR) and US/Global equities (USDT).</p>
         </div>
-        <div class="chart-legend">
-            <span><i class="legend-win"></i>Bullish Candle</span>
-            <span style="margin-left:8px;"><i class="legend-loss"></i>Bearish Candle</span>
+        <!-- Authentic Candlestick Pattern Legend -->
+        <div class="chart-legend-patterns">
+            <div class="candle-pattern-badge bullish-pattern" title="Bullish Up Candle: Close > Open (Buyers Dominant)">
+                <svg width="14" height="20" viewBox="0 0 14 20" fill="none" class="candle-icon">
+                    <line x1="7" y1="1" x2="7" y2="19" stroke="#078263" stroke-width="1.8" stroke-linecap="round"/>
+                    <rect x="2.5" y="5" width="9" height="10" rx="1.5" fill="#078263" stroke="#04634b" stroke-width="1"/>
+                </svg>
+                <span class="pattern-text">
+                    <strong>▲ Up Candle</strong>
+                    <small>Bullish Pattern</small>
+                </span>
+            </div>
+            <div class="candle-pattern-badge bearish-pattern" title="Bearish Down Candle: Open > Close (Sellers Dominant)">
+                <svg width="14" height="20" viewBox="0 0 14 20" fill="none" class="candle-icon">
+                    <line x1="7" y1="1" x2="7" y2="19" stroke="#c94d3d" stroke-width="1.8" stroke-linecap="round"/>
+                    <rect x="2.5" y="5" width="9" height="10" rx="1.5" fill="#c94d3d" stroke="#a33628" stroke-width="1"/>
+                </svg>
+                <span class="pattern-text">
+                    <strong>▼ Down Candle</strong>
+                    <small>Bearish Pattern</small>
+                </span>
+            </div>
         </div>
+    </div>
+
+    <!-- Stock Category Quick Switcher -->
+    <div style="display: flex; gap: 8px; margin-bottom: 12px; align-items: center;">
+        <span style="font-size: 11px; font-weight: 800; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em;">View Market:</span>
+        <a href="{{ url_for('stocks', market='India', q=query) }}" class="small-button {% if selected_market == 'India' %}primary-button{% else %}secondary-button{% endif %}" style="padding: 4px 10px; font-size: 11px;">🇮🇳 Indian Stocks</a>
+        <a href="{{ url_for('stocks', market='Global', q=query) }}" class="small-button {% if selected_market == 'Global' %}primary-button{% else %}secondary-button{% endif %}" style="padding: 4px 10px; font-size: 11px;">🌐 Global Equities</a>
+        <a href="{{ url_for('stocks', market='All', q=query) }}" class="small-button {% if selected_market == 'All' %}primary-button{% else %}secondary-button{% endif %}" style="padding: 4px 10px; font-size: 11px;">All Equities</a>
     </div>
 
     <div class="chart-asset-selector" id="stock-chart-pills">
@@ -143,13 +245,20 @@
             <input type="text" name="q" value="{{ query }}" placeholder="Search {{ 'crypto coins' if active_tab == 'crypto' else 'stocks by ticker or name' }}..." class="field-input search-input">
             {% if active_tab != 'crypto' %}
             <select name="market" class="field-input filter-select" onchange="this.form.submit()">
+                <option value="India" {% if selected_market == 'India' %}selected{% endif %}>🇮🇳 Indian Stocks (NSE / INR)</option>
+                <option value="Global" {% if selected_market == 'Global' %}selected{% endif %}>🌐 Global Stocks (US / USDT)</option>
                 <option value="All" {% if selected_market == 'All' %}selected{% endif %}>All Markets</option>
-                <option value="India" {% if selected_market == 'India' %}selected{% endif %}>India (NSE / INR)</option>
-                <option value="Global" {% if selected_market == 'Global' %}selected{% endif %}>Global (US / USDT)</option>
             </select>
             {% endif %}
             <button type="submit" class="secondary-button"><i data-lucide="search"></i>Search</button>
         </form>
+        {% if active_tab != 'crypto' %}
+        <div class="filter-tabs">
+            <a href="{{ url_for('stocks', market='India', q=query) }}" class="filter-tab {% if selected_market == 'India' %}is-active{% endif %}">🇮🇳 Indian Stocks</a>
+            <a href="{{ url_for('stocks', market='Global', q=query) }}" class="filter-tab {% if selected_market == 'Global' %}is-active{% endif %}">🌐 Global Stocks</a>
+            <a href="{{ url_for('stocks', market='All', q=query) }}" class="filter-tab {% if selected_market == 'All' %}is-active{% endif %}">All Equities</a>
+        </div>
+        {% endif %}
     </div>
 
     <div class="table-responsive">
@@ -157,6 +266,7 @@
             <thead>
                 <tr>
                     <th>Asset</th>
+                    <th>Market &amp; Type</th>
                     <th>Price</th>
                     <th>24h Change</th>
                     <th>Actions</th>
@@ -173,6 +283,15 @@
                                 <span class="asset-symbol-tag">{{ item.symbol }}</span>
                             </div>
                         </div>
+                    </td>
+                    <td>
+                        {% if active_tab == 'crypto' %}
+                            <span class="market-pill">Crypto &bull; USDT</span>
+                        {% elif item.currency == 'INR' %}
+                            <span class="market-pill" style="color: #905900; background: var(--gold-soft);">🇮🇳 Indian NSE</span>
+                        {% else %}
+                            <span class="market-pill" style="color: var(--teal); background: var(--teal-soft);">🌐 Global Equities</span>
+                        {% endif %}
                     </td>
                     <td>
                         <strong>{% if item.currency == 'INR' %}₹{% endif %}{{ item.price|currency_format(item.currency) }}</strong>
@@ -195,7 +314,8 @@
                             </button>
                             <button type="button" class="small-button js-watchlist {% if item.symbol in saved_symbols %}is-saved{% endif %}"
                                 data-symbol="{{ item.symbol }}"
-                                data-asset-type="{{ active_tab }}">
+                                data-asset-type="{{ active_tab }}"
+                                title="Add/remove from watchlist">
                                 <i data-lucide="star"></i>
                             </button>
                             <button type="button" class="small-button primary-button js-trade"

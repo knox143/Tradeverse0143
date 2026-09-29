@@ -898,12 +898,14 @@ def calculate_portfolio(user_id):
     usdt_cost = 0.0
 
     for r in rows:
+        qty = float(r["quantity"])
+        if qty <= 0.0000001:
+            continue
         sym = r["symbol"]
         atype = r["asset_type"]
         cur = r.get("currency") or get_currency_for_asset(sym, atype)
         quote = fetch_custom_quote(sym, atype)
         cur_p = float(quote["price"]) if quote else float(r["average_price"])
-        qty = float(r["quantity"])
         avg_p = float(r["average_price"])
         cost = qty * avg_p
         val = qty * cur_p
@@ -955,10 +957,10 @@ def get_database_path():
 def get_portfolio_rows(user_id):
     if _IS_POSTGRES:
         sql = """SELECT *, EXTRACT(EPOCH FROM (NOW() - COALESCE(opened_at, updated_at)))::INTEGER AS age_seconds
-                 FROM portfolio WHERE user_id = %s ORDER BY updated_at DESC"""
+                 FROM portfolio WHERE user_id = %s AND quantity > 0.0000001 ORDER BY updated_at DESC"""
     else:
         sql = """SELECT *, CAST((julianday('now') - julianday(COALESCE(opened_at, updated_at))) * 86400 AS INTEGER) AS age_seconds
-                 FROM portfolio WHERE user_id = %s ORDER BY updated_at DESC"""
+                 FROM portfolio WHERE user_id = %s AND quantity > 0.0000001 ORDER BY updated_at DESC"""
     return query_db(sql, (user_id,), fetchall=True) or []
 
 

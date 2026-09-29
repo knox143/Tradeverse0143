@@ -514,17 +514,21 @@ def stocks():
     [STOCKS TRADING STUDIO / स्टॉक मार्केट]
     -------------------------------------------------------------------------
     • Kya karta hai: Indian NSE stocks (₹ INR) aur Global US equities (USDT)
-      ki directory, live prices aur TradingView interactive candlestick charts dikhata hai.
+      ko alag-alag tabs aur dedicated sections me show karta hai.
     """
     user = get_current_user()
     q = request.args.get("q", "")
-    market = request.args.get("market", "All")
+    market = request.args.get("market", "India")
     items = engine.list_market(asset_type="stock", query=q, market=market)
+    indian_items = engine.list_market(asset_type="stock", query=q, market="India")
+    global_items = engine.list_market(asset_type="stock", query=q, market="Global")
     saved = {r["symbol"] for r in engine.get_watchlist(user["id"]) if r["asset_type"] == "stock"}
     return render_template(
         "trade.html",
         active_tab="stock",
         items=items,
+        indian_items=indian_items,
+        global_items=global_items,
         query=q,
         selected_market=market,
         saved_symbols=saved,
@@ -569,11 +573,12 @@ def portfolio():
     -------------------------------------------------------------------------
     • Kya karta hai: User ke sabhi active stock aur crypto holdings ko live market
       price se calculate karke net P&L aur closed trade duration ledger show karta hai.
+    • Transactions: Exactly last 15 transactions show karta hai.
     """
     user = get_current_user()
     data = engine.calculate_portfolio(user["id"])
     closed = engine.get_closed_trades(user["id"], limit=50)
-    transactions = engine.get_transactions(user["id"], limit=20)
+    transactions = engine.get_transactions(user["id"], limit=15)
     return render_template(
         "portfolio.html",
         portfolio=data,
@@ -620,7 +625,7 @@ def watchlist():
             "change": quote.get("change", 0.0),
             "currency": quote.get("currency", "USDT"),
         })
-    return render_template("watchlist.html", watchlist=items, page_name="Watchlist")
+    return render_template("watchlist.html", items=items, watchlist=items, page_name="Watchlist")
 
 
 @app.route("/learning")
@@ -777,6 +782,12 @@ def sync_state():
         portfolio=data.get("portfolio"),
         transactions=data.get("transactions"),
     )
+    if data.get("portfolio") is not None:
+        session["user_portfolio"] = data.get("portfolio")
+    if data.get("wallet") is not None:
+        session["user_wallet"] = data.get("wallet")
+    if data.get("transactions") is not None:
+        session["user_transactions"] = data.get("transactions")
     return jsonify({"ok": True, "message": "State synced successfully"})
 
 

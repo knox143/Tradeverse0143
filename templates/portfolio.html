@@ -3,15 +3,16 @@
 {% block content %}
 <section class="portfolio-header">
     <div>
-        <p class="eyebrow">Paper account &bull; Dual Currency</p>
+        <p class="eyebrow">Practice Portfolio &bull; Dual Currency</p>
         <h2>Your portfolio, in one place.</h2>
-        <p>Current values estimated from real-time live quotes in INR ₹ & USDT with official company and crypto logos.</p>
+        <p>Current values calculated from live market quotes in INR (₹) &amp; USDT with official asset logos and real-time P&amp;L.</p>
     </div>
-    <div style="display: flex; gap: 10px; align-items: center;">
+    <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
         <form action="{{ url_for('reset_wallet_route') }}" method="POST" style="margin: 0;" onsubmit="return confirm('Reset virtual practice wallet back to ₹10,00,000 INR and 10,000 USDT?');">
             <button type="submit" class="secondary-button" title="Reset virtual wallet balance to initial funds"><i data-lucide="rotate-ccw"></i>Reset Wallet</button>
         </form>
-        <a class="primary-button" href="{{ url_for('stocks') }}"><i data-lucide="plus"></i>New trade</a>
+        <a class="primary-button" href="{{ url_for('stocks', market='India') }}"><i data-lucide="landmark"></i>Trade Stocks</a>
+        <a class="secondary-button" href="{{ url_for('crypto') }}"><i data-lucide="bitcoin"></i>Trade Crypto</a>
     </div>
 </section>
 
@@ -22,7 +23,7 @@
             <div class="metric-dual-row"><small>INR Value</small><strong>{{ portfolio.inr_total_value|inr }}</strong></div>
             <div class="metric-dual-row"><small>USDT Value</small><strong>{{ portfolio.usdt_total_value|usdt }}</strong></div>
         </div>
-        <p>Across {{ portfolio.holdings|length }} holding{% if portfolio.holdings|length != 1 %}s{% endif %}</p>
+        <p>Across {{ portfolio.holdings|length }} active holding{% if portfolio.holdings|length != 1 %}s{% endif %}</p>
     </article>
     <article class="metric-card">
         <div class="metric-heading"><span>Investment value</span><i data-lucide="circle-dollar-sign"></i></div>
@@ -42,47 +43,74 @@
     </article>
 </section>
 
+<!-- Current Holdings Section (All Bought Shares & Coins) -->
 <section class="table-section">
     <div class="section-heading">
         <div>
-            <p class="eyebrow">Active positions</p>
-            <h2>Current holdings</h2>
+            <p class="eyebrow">Active Positions</p>
+            <h2>Current Holdings (All Shares &amp; Coins)</h2>
+            <p>Every bought stock share and cryptocurrency coin currently held in your portfolio.</p>
         </div>
-        <span class="data-label"><i data-lucide="wallet"></i><span data-wallet-inr>{{ portfolio.inr_wallet|inr }}</span> &bull; <span data-wallet-usdt>{{ portfolio.usdt_wallet|usdt }}</span> available</span>
+        <span class="data-label"><i data-lucide="wallet"></i><span data-wallet-inr>{{ portfolio.wallet.inr|inr }}</span> &bull; <span data-wallet-usdt>{{ portfolio.wallet.usdt|usdt }}</span> available</span>
     </div>
+
     {% if portfolio.holdings %}
+    <!-- Holdings Category Filter Tabs -->
+    <div class="holdings-filter-tabs">
+        <button type="button" class="holdings-tab-btn is-active" data-holdings-filter="all">All Holdings ({{ portfolio.holdings|length }})</button>
+        <button type="button" class="holdings-tab-btn" data-holdings-filter="indian">🇮🇳 Indian Stocks</button>
+        <button type="button" class="holdings-tab-btn" data-holdings-filter="global">🌐 Global Equities</button>
+        <button type="button" class="holdings-tab-btn" data-holdings-filter="crypto">🪙 Crypto Coins</button>
+    </div>
+
     <div class="table-wrap">
         <table class="holdings-table">
             <thead>
                 <tr>
                     <th>Instrument</th>
-                    <th>Trading Pair</th>
-                    <th>Units</th>
-                    <th class="numeric">Average price</th>
-                    <th class="numeric">Current price</th>
-                    <th class="numeric">Investment</th>
-                    <th class="numeric">Current value</th>
-                    <th class="numeric">P/L</th>
-                    <th></th>
+                    <th>Type</th>
+                    <th>Units Held</th>
+                    <th class="numeric">Average Buy Price</th>
+                    <th class="numeric">Live Market Price</th>
+                    <th class="numeric">Total Investment</th>
+                    <th class="numeric">Current Value</th>
+                    <th class="numeric">Unrealized P/L</th>
+                    <th>Actions</th>
                 </tr>
             </thead>
             <tbody>
                 {% for holding in portfolio.holdings %}
-                <tr>
+                {% set is_crypto = (holding.asset_type == 'crypto' or holding.symbol in ['BTC', 'ETH', 'SOL', 'BNB', 'XRP', 'DOGE', 'ADA', 'MATIC']) %}
+                {% set is_indian = (holding.currency == 'INR' or holding.symbol.endswith('.NS') or holding.symbol.endswith('.BO')) %}
+                <tr data-holding-category="{% if is_crypto %}crypto{% elif is_indian %}indian{% else %}global{% endif %}">
                     <td>
                         <div class="instrument-cell">
                             <span class="instrument-icon-wrap">{{ holding.symbol|asset_icon(holding.asset_type, 32) }}</span>
-                            <span><strong>{{ holding.symbol }}</strong><small>{{ holding.asset_name }}</small></span>
+                            <div>
+                                <strong>{{ holding.symbol }}</strong>
+                                <small>{{ holding.asset_name }}</small>
+                            </div>
                         </div>
                     </td>
-                    <td><span class="pair-tag">{{ holding.symbol|market_pair(holding.currency) }}</span></td>
-                    <td>{{ holding.quantity|quantity }}</td>
+                    <td>
+                        {% if is_crypto %}
+                            <span class="market-pill" style="color: #c7911a; background: var(--gold-soft);">🪙 Coin</span>
+                        {% elif is_indian %}
+                            <span class="market-pill" style="color: #905900; background: var(--gold-soft);">🇮🇳 NSE Share</span>
+                        {% else %}
+                            <span class="market-pill" style="color: var(--teal); background: var(--teal-soft);">🌐 US Share</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <strong>{{ holding.quantity|quantity }}</strong>
+                        <small>{% if is_crypto %}Coins{% else %}Shares{% endif %}</small>
+                    </td>
                     <td class="numeric">{{ holding.average_price|currency_val(holding.currency) }}</td>
                     <td class="numeric"><strong>{{ holding.current_price|currency_val(holding.currency) }}</strong></td>
                     <td class="numeric">{{ holding.cost_basis|currency_val(holding.currency) }}</td>
                     <td class="numeric"><strong>{{ holding.current_value|currency_val(holding.currency) }}</strong></td>
                     <td class="numeric">
-                        <b class="{% if holding.profit_loss >= 0 %}positive{% else %}negative{% endif %}">{{ holding.profit_loss|signed_currency(holding.currency) }}</b>
+                        <strong class="{% if holding.profit_loss >= 0 %}positive{% else %}negative{% endif %}">{{ holding.profit_loss|signed_currency(holding.currency) }}</strong>
                         <small class="{% if holding.profit_loss >= 0 %}positive{% else %}negative{% endif %}">{{ holding.profit_loss_percent|signed }}%</small>
                     </td>
                     <td>
@@ -97,12 +125,13 @@
     </div>
     {% else %}
     <div class="empty-state portfolio-empty">
-        <i data-lucide="briefcase-business"></i>
+        <div class="empty-state-icon-orb"><i data-lucide="briefcase-business"></i></div>
         <h3>Your portfolio is ready for a first practice trade.</h3>
-        <p>Start with a small virtual position in INR or USDT and review what changes.</p>
-        <div style="display: flex; gap: 10px; margin-top: 10px;">
-            <a class="primary-button" href="{{ url_for('crypto') }}"><i data-lucide="coins"></i>Trade Crypto</a>
-            <a class="secondary-button" href="{{ url_for('stocks') }}"><i data-lucide="landmark"></i>Trade Stocks</a>
+        <p>No active positions found. Buy Indian shares, US stocks, or crypto to start building your portfolio.</p>
+        <div class="empty-state-actions">
+            <a class="primary-button" href="{{ url_for('stocks', market='India') }}"><i data-lucide="landmark"></i>Buy Indian Stocks</a>
+            <a class="secondary-button" href="{{ url_for('stocks', market='Global') }}"><i data-lucide="globe"></i>Buy Global Stocks</a>
+            <a class="secondary-button" href="{{ url_for('crypto') }}"><i data-lucide="bitcoin"></i>Buy Crypto</a>
         </div>
     </div>
     {% endif %}
@@ -160,23 +189,53 @@
     {% endif %}
 </section>
 
+<!-- Transaction History Section (Last 15 Transactions) -->
 <section class="table-section" style="margin-top: 24px;">
-    <div class="section-heading"><div><p class="eyebrow">Paper ledger</p><h2>Transaction history</h2></div></div>
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Paper Ledger</p>
+            <h2>Transaction History (Last 15)</h2>
+            <p>Real-time audit log of your most recent 15 buy and sell orders.</p>
+        </div>
+        <span class="data-label"><i data-lucide="receipt-text"></i>Last 15 Orders</span>
+    </div>
     {% if transactions %}
     <div class="table-wrap">
         <table>
-            <thead><tr><th>Instrument</th><th>Order</th><th>Quantity</th><th class="numeric">Price</th><th class="numeric">Amount</th><th>Completed</th></tr></thead>
+            <thead>
+                <tr>
+                    <th>Instrument</th>
+                    <th>Market Type</th>
+                    <th>Order Type</th>
+                    <th>Quantity</th>
+                    <th class="numeric">Execution Price</th>
+                    <th class="numeric">Total Value</th>
+                    <th>Executed At</th>
+                </tr>
+            </thead>
             <tbody>
                 {% for transaction in transactions %}
                 <tr>
                     <td>
                         <div class="instrument-cell">
-                            <span class="instrument-icon-wrap">{{ transaction.symbol|asset_icon('stock', 24) }}</span>
-                            <span><strong>{{ transaction.symbol }}</strong><small>{{ transaction.asset_name }}</small></span>
+                            <span class="instrument-icon-wrap">{{ transaction.symbol|asset_icon(transaction.asset_type or 'stock', 26) }}</span>
+                            <div>
+                                <strong>{{ transaction.symbol }}</strong>
+                                <small>{{ transaction.asset_name }}</small>
+                            </div>
                         </div>
                     </td>
+                    <td>
+                        {% if transaction.asset_type == 'crypto' %}
+                            <span class="market-pill">Crypto &bull; USDT</span>
+                        {% elif transaction.currency == 'INR' %}
+                            <span class="market-pill" style="color: #905900; background: var(--gold-soft);">🇮🇳 Indian NSE</span>
+                        {% else %}
+                            <span class="market-pill" style="color: var(--teal); background: var(--teal-soft);">🌐 Global Equities</span>
+                        {% endif %}
+                    </td>
                     <td><span class="trade-tag {{ transaction.trade_type|lower }}">{{ transaction.trade_type }}</span></td>
-                    <td>{{ transaction.quantity|quantity }}</td>
+                    <td><strong>{{ transaction.quantity|quantity }}</strong></td>
                     <td class="numeric">{{ transaction.price|currency_val(transaction.currency) }}</td>
                     <td class="numeric"><strong>{{ transaction.total_amount|currency_val(transaction.currency) }}</strong></td>
                     <td>{{ transaction.created_at }}</td>
@@ -186,7 +245,10 @@
         </table>
     </div>
     {% else %}
-    <div class="empty-state horizontal"><i data-lucide="receipt-text"></i><p>Complete a virtual buy or sell order to create your ledger.</p></div>
+    <div class="empty-state horizontal">
+        <i data-lucide="receipt-text"></i>
+        <p>Complete a virtual buy or sell order to create your ledger records.</p>
+    </div>
     {% endif %}
 </section>
 {% endblock %}

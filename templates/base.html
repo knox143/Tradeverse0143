@@ -28,7 +28,8 @@
             <p class="sidebar-label">Workspace</p>
             <nav class="main-nav">
                 <a class="nav-link {% if request.endpoint == 'dashboard' %}is-active{% endif %}" href="{{ url_for('dashboard') }}"><i data-lucide="layout-dashboard"></i>Dashboard</a>
-                <a class="nav-link {% if request.endpoint == 'stocks' %}is-active{% endif %}" href="{{ url_for('stocks') }}"><i data-lucide="landmark"></i>Stocks</a>
+                <a class="nav-link {% if request.endpoint == 'stocks' and (request.args.get('market') == 'India' or not request.args.get('market')) %}is-active{% endif %}" href="{{ url_for('stocks', market='India') }}"><i data-lucide="landmark"></i>Indian Stocks</a>
+                <a class="nav-link {% if request.endpoint == 'stocks' and request.args.get('market') == 'Global' %}is-active{% endif %}" href="{{ url_for('stocks', market='Global') }}"><i data-lucide="globe"></i>Global Stocks</a>
                 <a class="nav-link {% if request.endpoint == 'crypto' %}is-active{% endif %}" href="{{ url_for('crypto') }}"><i data-lucide="bitcoin"></i>Crypto</a>
                 <a class="nav-link {% if request.endpoint == 'portfolio' %}is-active{% endif %}" href="{{ url_for('portfolio') }}"><i data-lucide="briefcase-business"></i>Portfolio</a>
                 <a class="nav-link {% if request.endpoint == 'watchlist' %}is-active{% endif %}" href="{{ url_for('watchlist') }}"><i data-lucide="star"></i>Watchlist</a>
