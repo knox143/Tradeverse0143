@@ -537,11 +537,134 @@ def restore_user_to_db(user_data, wallet=None, watchlist=None, portfolio=None, t
 
 
 # ==============================================================================
-# SECTION 3: CUSTOM MARKET API & 10-SECOND TTL IN-MEMORY CACHE
+# SECTION 3: RESILIENT REDIS CACHE & MARKET API ENGINE (<20ms LATENCY TARGET)
 # ==============================================================================
+REDIS_URL = os.environ.get("REDIS_URL")
+_REDIS_CLIENT = None
+_REDIS_POOL = None
+
+# Cache TTL Configurations (in seconds)
+STOCK_CACHE_TTL = 30       # quote:stock:{SYMBOL} -> TTL: 30s
+CRYPTO_CACHE_TTL = 15      # quote:crypto:{COIN_ID} -> TTL: 15s
+HISTORY_CACHE_TTL = 300    # history:{SYMBOL}:{INTERVAL} -> TTL: 300s (5m)
+
+CRYPTO_COIN_MAP = {
+    "BTC": "bitcoin",
+    "ETH": "ethereum",
+    "BNB": "binancecoin",
+    "SOL": "solana",
+    "XRP": "ripple",
+    "DOGE": "dogecoin",
+    "ADA": "cardano",
+    "MATIC": "matic-network",
+    "POL": "matic-network",
+}
+
+def get_stock_cache_key(symbol: str) -> str:
+    """Generate standard Redis key for stock quote: quote:stock:{SYMBOL}"""
+    return f"quote:stock:{symbol.upper().strip()}"
+
+def get_crypto_cache_key(coin_id_or_symbol: str) -> str:
+    """Generate standard Redis key for crypto quote: quote:crypto:{COIN_ID}"""
+    cleaned = str(coin_id_or_symbol).strip()
+    coin_id = CRYPTO_COIN_MAP.get(cleaned.upper(), cleaned.lower())
+    return f"quote:crypto:{coin_id}"
+
+def get_history_cache_key(symbol: str, interval: str) -> str:
+    """Generate standard Redis key for chart history: history:{SYMBOL}:{INTERVAL}"""
+    return f"history:{symbol.upper().strip()}:{interval.strip()}"
+
+def get_redis_client():
+    """
+    Return a thread-safe singleton Redis client with connection pooling.
+    If Redis is unconfigured or offline, returns None gracefully.
+    """
+    global _REDIS_CLIENT, _REDIS_POOL
+    if _REDIS_CLIENT is not None:
+        return _REDIS_CLIENT
+
+    redis_url = os.environ.get("REDIS_URL") or REDIS_URL
+    if not redis_url:
+        return None
+
+    try:
+        import redis
+        _REDIS_POOL = redis.ConnectionPool.from_url(
+            redis_url,
+            decode_responses=True,
+            socket_timeout=1.0,
+            socket_connect_timeout=1.0,
+            retry_on_timeout=False,
+            max_connections=20
+        )
+        _REDIS_CLIENT = redis.Redis(connection_pool=_REDIS_POOL)
+        return _REDIS_CLIENT
+    except Exception as e:
+        logger.warning(f"Redis initialization warning (falling back gracefully): {e}")
+        return None
+
+def is_redis_available() -> bool:
+    """
+    Resilient connection health check helper.
+    Returns True if Redis is reachable and responding to PING, False otherwise.
+    """
+    try:
+        client = get_redis_client()
+        if client is None:
+            return False
+        return bool(client.ping())
+    except Exception:
+        return False
+
+def redis_get(key: str):
+    """Safely fetch and deserialize JSON from Redis. Returns None on miss or failure."""
+    try:
+        client = get_redis_client()
+        if client is not None:
+            val = client.get(key)
+            if val is not None:
+                return json.loads(val)
+    except Exception as e:
+        logger.debug(f"Redis GET bypassed for {key} (falling back): {e}")
+    return None
+
+def redis_setex(key: str, ttl: int, value) -> bool:
+    """Safely serialize and store value in Redis with TTL. Returns True on success, False on failure."""
+    try:
+        client = get_redis_client()
+        if client is not None:
+            serialized = json.dumps(value) if not isinstance(value, str) else value
+            return bool(client.setex(key, int(ttl), serialized))
+    except Exception as e:
+        logger.debug(f"Redis SETEX bypassed for {key} (falling back): {e}")
+    return False
+
+class CandleList(list):
+    """
+    A list of candle dictionaries with caching metadata and dict-like accessor compatibility.
+    Guarantees backwards-compatibility whether accessed as a list or checked for .cached / ['cached'].
+    """
+    def __init__(self, items=None, cached=False):
+        super().__init__(items or [])
+        self.cached = bool(cached)
+
+    def __getitem__(self, item):
+        if item == "cached":
+            return self.cached
+        if item == "candles":
+            return list(self)
+        return super().__getitem__(item)
+
+    def get(self, key, default=None):
+        if key == "cached":
+            return self.cached
+        if key == "candles":
+            return list(self)
+        return default
+
 _PRICE_CACHE = {}      # symbol -> {"data": dict, "ts": float}
 _CANDLE_CACHE = {}     # key -> {"candles": list, "ts": float}
-CACHE_TTL = 10         # Strict 10-second TTL as requested for low latency
+CACHE_TTL = 10         # Fallback in-memory cache TTL (seconds)
 
 _session = requests.Session()
 _session.headers.update({"User-Agent": "TradeVerse-MarketEngine/3.0"})
@@ -584,16 +707,45 @@ def get_currency_for_asset(symbol, asset_type):
 
 
 def fetch_custom_quote(symbol, asset_type):
-    """Fetch live quote from Custom API / external feed with fast in-memory caching (<30ms)."""
+    """
+    Fetch live market quote using Cache-Aside pattern (<20ms cache latency target).
+    1. Check Redis cache:
+       - quote:stock:{SYMBOL} (TTL: 30s)
+       - quote:crypto:{COIN_ID} (TTL: 15s)
+       If hit, returns immediately with 'cached': True.
+    2. If miss or Redis unavailable, fall back to in-memory cache or fetch external APIs.
+    3. On successful fetch, write to Redis with SETEX and the corresponding TTL.
+    """
     sym = symbol.upper().strip()
     now = time.time()
-    if sym in _PRICE_CACHE and (now - _PRICE_CACHE[sym]["ts"] < CACHE_TTL):
-        return _PRICE_CACHE[sym]["data"].copy()
 
+    # Step 1: Check Redis Cache First (<20ms)
+    primary_redis_key = get_crypto_cache_key(sym) if asset_type == "crypto" else get_stock_cache_key(sym)
+    alt_redis_key = f"quote:crypto:{sym}" if asset_type == "crypto" else None
+
+    cached_quote = redis_get(primary_redis_key)
+    if not cached_quote and alt_redis_key and alt_redis_key != primary_redis_key:
+        cached_quote = redis_get(alt_redis_key)
+
+    if cached_quote and isinstance(cached_quote, dict):
+        res = cached_quote.copy()
+        res["cached"] = True
+        _PRICE_CACHE[sym] = {"data": res.copy(), "ts": now}
+        return res
+
+    # Fallback: In-memory cache
+    if sym in _PRICE_CACHE and (now - _PRICE_CACHE[sym]["ts"] < CACHE_TTL):
+        res = _PRICE_CACHE[sym]["data"].copy()
+        res["cached"] = True
+        return res
+
+    # Step 2: Cache Miss / Redis Down -> Fetch Live API
     currency = get_currency_for_asset(sym, asset_type)
     baseline = next((item.copy() for item in (BASE_CRYPTO if asset_type == "crypto" else BASE_STOCKS) if item["symbol"] == sym), None)
 
-    # 1. Custom API Endpoint if configured
+    res = None
+
+    # 1. Custom Market API if configured
     if CUSTOM_MARKET_API_URL:
         try:
             resp = _session.get(f"{CUSTOM_MARKET_API_URL}?symbol={sym}&type={asset_type}", timeout=2.0)
@@ -609,49 +761,72 @@ def fetch_custom_quote(symbol, asset_type):
                         "market": data.get("market", "Custom Feed"),
                         "source": "Custom API",
                     }
-                    _PRICE_CACHE[sym] = {"data": res.copy(), "ts": now}
-                    return res
         except Exception:
             pass
 
-    # 2. Native Public Real-Time Feeds
-    res = None
-    if asset_type == "crypto":
-        try:
-            resp = _session.get(f"https://api.binance.com/api/v3/ticker/24hr?symbol={sym}USDT", timeout=1.8)
-            if resp.status_code == 200:
-                p = resp.json()
-                price = float(p["lastPrice"])
-                res = {
-                    "symbol": sym,
-                    "name": baseline["name"] if baseline else sym,
-                    "price": round(price, 4 if price < 1 else 2),
-                    "change": round(float(p.get("priceChangePercent", 0)), 2),
-                    "currency": "USDT",
-                    "source": "Binance Live",
-                }
-        except Exception:
-            pass
-    else:
-        try:
-            resp = _session.get(f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}?interval=1d&range=1d", timeout=2.0)
-            if resp.status_code == 200:
-                chart = resp.json().get("chart", {}).get("result", [{}])[0].get("meta", {})
-                price = chart.get("regularMarketPrice")
-                if price:
-                    prev = chart.get("chartPreviousClose") or price
-                    chg = ((float(price) - float(prev)) / float(prev) * 100) if prev else 0.0
+    # 2. Native Public Real-Time Feeds (Binance / Yahoo Finance / CoinGecko)
+    if not res:
+        if asset_type == "crypto":
+            # Primary Crypto Feed: Binance Live Ticker
+            try:
+                resp = _session.get(f"https://api.binance.com/api/v3/ticker/24hr?symbol={sym}USDT", timeout=1.8)
+                if resp.status_code == 200:
+                    p = resp.json()
+                    price = float(p["lastPrice"])
                     res = {
                         "symbol": sym,
                         "name": baseline["name"] if baseline else sym,
-                        "price": round(float(price), 2),
-                        "change": round(chg, 2),
-                        "currency": currency,
-                        "market": "India" if currency == "INR" else "Global",
-                        "source": "Yahoo Finance (Free Feed - 10-15m Delay)",
+                        "price": round(price, 4 if price < 1 else 2),
+                        "change": round(float(p.get("priceChangePercent", 0)), 2),
+                        "currency": "USDT",
+                        "source": "Binance Live",
                     }
-        except Exception:
-            pass
+            except Exception:
+                pass
+
+            # Secondary Crypto Feed: CoinGecko Free API
+            if not res:
+                coin_id = CRYPTO_COIN_MAP.get(sym, sym.lower())
+                try:
+                    resp = _session.get(
+                        f"https://api.coingecko.com/api/v3/simple/price?ids={coin_id}&vs_currencies=usd&include_24hr_change=true",
+                        timeout=2.0
+                    )
+                    if resp.status_code == 200:
+                        cg_data = resp.json().get(coin_id, {})
+                        if "usd" in cg_data:
+                            c_p = float(cg_data["usd"])
+                            res = {
+                                "symbol": sym,
+                                "name": baseline["name"] if baseline else sym,
+                                "price": round(c_p, 4 if c_p < 1 else 2),
+                                "change": round(float(cg_data.get("usd_24h_change", 0.0)), 2),
+                                "currency": "USDT",
+                                "source": "CoinGecko Free",
+                            }
+                except Exception:
+                    pass
+        else:
+            # Equities Feed: Yahoo Finance
+            try:
+                resp = _session.get(f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}?interval=1d&range=1d", timeout=2.0)
+                if resp.status_code == 200:
+                    chart = resp.json().get("chart", {}).get("result", [{}])[0].get("meta", {})
+                    price = chart.get("regularMarketPrice")
+                    if price:
+                        prev = chart.get("chartPreviousClose") or price
+                        chg = ((float(price) - float(prev)) / float(prev) * 100) if prev else 0.0
+                        res = {
+                            "symbol": sym,
+                            "name": baseline["name"] if baseline else sym,
+                            "price": round(float(price), 2),
+                            "change": round(chg, 2),
+                            "currency": currency,
+                            "market": "India" if currency == "INR" else "Global",
+                            "source": "Yahoo Finance (Free Feed - 10-15m Delay)",
+                        }
+            except Exception:
+                pass
 
     if not res:
         res = baseline or {
@@ -663,8 +838,20 @@ def fetch_custom_quote(symbol, asset_type):
             "source": "Calibrated Baseline",
         }
 
+    # Step 3: Write to Redis with SETEX using specified TTL
+    ttl = CRYPTO_CACHE_TTL if asset_type == "crypto" else STOCK_CACHE_TTL
+    cache_payload = res.copy()
+    cache_payload["cached"] = True
+    redis_setex(primary_redis_key, ttl, cache_payload)
+    if alt_redis_key and alt_redis_key != primary_redis_key:
+        redis_setex(alt_redis_key, ttl, cache_payload)
+
+    # Update In-Memory fallback cache
     _PRICE_CACHE[sym] = {"data": res.copy(), "ts": now}
-    return res.copy()
+
+    res_out = res.copy()
+    res_out["cached"] = False
+    return res_out
 
 
 def list_market(asset_type="stock", query="", market="All"):
@@ -692,20 +879,35 @@ def list_market(asset_type="stock", query="", market="All"):
 
 
 def get_market_candles(symbol, asset_type, timeframe="1y"):
-    """Fetch candlestick OHLC data for TradingView chart."""
-    key = f"{symbol.upper()}:{asset_type}:{timeframe}"
+    """
+    Fetch candlestick OHLC data for TradingView chart with Resilient Redis Cache-Aside.
+    Cache Key: history:{SYMBOL}:{INTERVAL} -> TTL: 300 seconds (5 minutes)
+    """
+    sym = symbol.upper().strip()
+    local_key = f"{sym}:{asset_type}:{timeframe}"
+    history_key = get_history_cache_key(sym, timeframe)
     now = time.time()
-    if key in _CANDLE_CACHE and (now - _CANDLE_CACHE[key]["ts"] < 60):
-        return _CANDLE_CACHE[key]["candles"]
+
+    # Step 1: Check Redis Cache First (<20ms)
+    cached_history = redis_get(history_key)
+    if cached_history:
+        candles_list = cached_history if isinstance(cached_history, list) else cached_history.get("candles", [])
+        if candles_list:
+            _CANDLE_CACHE[local_key] = {"candles": candles_list, "ts": now}
+            return CandleList(candles_list, cached=True)
+
+    # Fallback: In-memory cache
+    if local_key in _CANDLE_CACHE and (now - _CANDLE_CACHE[local_key]["ts"] < 60):
+        return CandleList(_CANDLE_CACHE[local_key]["candles"], cached=True)
 
     candles = []
+    interval = "1d"
     if asset_type == "crypto":
         try:
-            interval = "1d"
             limit = 100
             if timeframe in ("1m", "5m", "15m", "1h"):
                 interval = timeframe
-            resp = _session.get(f"https://api.binance.com/api/v3/klines?symbol={symbol.upper()}USDT&interval={interval}&limit={limit}", timeout=2.5)
+            resp = _session.get(f"https://api.binance.com/api/v3/klines?symbol={sym}USDT&interval={interval}&limit={limit}", timeout=2.5)
             if resp.status_code == 200:
                 data = resp.json()
                 for item in data:
@@ -721,7 +923,7 @@ def get_market_candles(symbol, asset_type, timeframe="1y"):
             pass
     else:
         try:
-            resp = _session.get(f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=1d&range=3mo", timeout=2.5)
+            resp = _session.get(f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}?interval=1d&range=3mo", timeout=2.5)
             if resp.status_code == 200:
                 data = resp.json()["chart"]["result"][0]
                 ts = data.get("timestamp", [])
@@ -738,9 +940,9 @@ def get_market_candles(symbol, asset_type, timeframe="1y"):
 
     # High-accuracy procedural fallback if network drops
     if not candles:
-        quote = fetch_custom_quote(symbol, asset_type)
+        quote = fetch_custom_quote(sym, asset_type)
         cur_p = quote["price"]
-        seed = sum(ord(c) for c in symbol)
+        seed = sum(ord(c) for c in sym)
         p = cur_p * 0.95
         for i in range(45):
             drift = (((seed + i * 13) % 17) - 8) / 200
@@ -754,8 +956,14 @@ def get_market_candles(symbol, asset_type, timeframe="1y"):
             })
             p = cp
 
-    _CANDLE_CACHE[key] = {"candles": candles, "ts": now}
-    return candles
+    # Step 3: Write to Redis with SETEX (TTL: 300 seconds / 5 minutes)
+    if candles:
+        redis_setex(history_key, HISTORY_CACHE_TTL, candles)
+        if interval != timeframe:
+            redis_setex(get_history_cache_key(sym, interval), HISTORY_CACHE_TTL, candles)
+
+    _CANDLE_CACHE[local_key] = {"candles": candles, "ts": now}
+    return CandleList(candles, cached=False)
 
 
 # ==============================================================================

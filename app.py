@@ -752,7 +752,8 @@ def watchlist_remove(asset_type, symbol):
 def chart_data(asset_type, symbol):
     tf = request.args.get("timeframe", "1y")
     candles = engine.get_market_candles(symbol, asset_type, timeframe=tf)
-    return jsonify({"ok": True, "candles": candles})
+    is_cached = bool(getattr(candles, "cached", False))
+    return jsonify({"ok": True, "candles": candles, "cached": is_cached})
 
 
 @app.route("/api/market/quote")
@@ -761,7 +762,27 @@ def market_quote():
     symbol = request.args.get("symbol", "")
     asset_type = request.args.get("type", "stock")
     quote = engine.fetch_custom_quote(symbol, asset_type)
-    return jsonify({"ok": True, "quote": quote})
+    return jsonify({"ok": True, "quote": quote, "cached": bool(quote.get("cached", False))})
+
+
+@app.route("/api/health")
+def api_health():
+    redis_ok = engine.is_redis_available()
+    return jsonify({
+        "status": "healthy",
+        "redis_available": redis_ok,
+        "database": "postgresql" if engine._IS_POSTGRES else "sqlite",
+    })
+
+
+@app.route("/api/cache/status")
+def cache_status():
+    return jsonify({
+        "redis_available": engine.is_redis_available(),
+        "redis_configured": bool(os.environ.get("REDIS_URL") or engine.REDIS_URL),
+        "in_memory_quotes_cached": len(engine._PRICE_CACHE),
+        "in_memory_candles_cached": len(engine._CANDLE_CACHE),
+    })
 
 
 @app.route("/api/icon/<asset_type>/<symbol>")

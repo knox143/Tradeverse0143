@@ -25,6 +25,7 @@ else:
     uid = u["id"]
 
 # Sign in session
+engine.reset_wallet(uid)
 with client.session_transaction() as sess:
     sess["user_id"] = uid
     sess["user_email"] = email

@@ -6,3 +6,4 @@ markupsafe>=2.1.0
 itsdangerous>=2.1.0
 psycopg2-binary>=2.9.9
 gunicorn>=21.2.0
+redis>=5.0.0
