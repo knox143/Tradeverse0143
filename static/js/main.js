@@ -337,6 +337,8 @@
             }
             container.innerHTML = "";
 
+            const isIntraday = (typeof result.candles[0]?.time === "number") && ["1m", "5m", "15m", "30m", "1h", "4h"].includes(tf.toLowerCase());
+
             const chart = window.LightweightCharts.createChart(container, {
                 width: container.clientWidth || 300,
                 height: container.clientHeight || 260,
@@ -345,6 +347,9 @@
                     textColor: "#64736f",
                     fontFamily: "Manrope, Arial, sans-serif",
                 },
+                localization: {
+                    dateFormat: "dd MMM yyyy",
+                },
                 grid: {
                     vertLines: { color: "#edf1ef" },
                     horzLines: { color: "#edf1ef" },
@@ -352,7 +357,8 @@
                 rightPriceScale: { borderColor: "#d9e2dd" },
                 timeScale: {
                     borderColor: "#d9e2dd",
-                    timeVisible: true,
+                    timeVisible: isIntraday,
+                    secondsVisible: false,
                     barSpacing: 12,
                     minBarSpacing: 5,
                 },
@@ -375,6 +381,61 @@
 
             series.setData(result.candles);
             chart.timeScale().fitContent();
+
+            // Live OHLC floating banner on the chart
+            let ohlcBanner = container.querySelector(".chart-ohlc-banner");
+            if (!ohlcBanner) {
+                ohlcBanner = document.createElement("div");
+                ohlcBanner.className = "chart-ohlc-banner";
+                container.style.position = "relative";
+                container.appendChild(ohlcBanner);
+            }
+
+            const chartCurrency = (assetType === "crypto" || !symbol.endsWith(".NS")) ? "USDT" : "INR";
+            function updateOhlcDisplay(bar) {
+                if (!bar || !ohlcBanner) return;
+                const isBull = bar.close >= bar.open;
+                const color = isBull ? "var(--positive)" : "var(--negative)";
+                let dateStr = "";
+                if (typeof bar.time === "string") {
+                    const parts = bar.time.split("-");
+                    if (parts.length === 3) {
+                        const d = new Date(Date.UTC(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2])));
+                        dateStr = d.toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" });
+                    } else {
+                        dateStr = bar.time;
+                    }
+                } else if (typeof bar.time === "number") {
+                    const d = new Date(bar.time * 1000);
+                    if (isIntraday) {
+                        dateStr = d.toLocaleDateString(undefined, { day: "2-digit", month: "short" }) + " " + d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false });
+                    } else {
+                        dateStr = d.toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
+                    }
+                }
+                ohlcBanner.innerHTML = `
+                    <span class="ohlc-date"><strong>${dateStr}</strong></span>
+                    <span class="ohlc-stat">O: <b style="color:${color}">${formatCurrency(bar.open, chartCurrency)}</b></span>
+                    <span class="ohlc-stat">H: <b style="color:${color}">${formatCurrency(bar.high, chartCurrency)}</b></span>
+                    <span class="ohlc-stat">L: <b style="color:${color}">${formatCurrency(bar.low, chartCurrency)}</b></span>
+                    <span class="ohlc-stat">C: <b style="color:${color}">${formatCurrency(bar.close, chartCurrency)}</b></span>
+                `;
+            }
+
+            if (result.candles.length > 0) {
+                updateOhlcDisplay(result.candles[result.candles.length - 1]);
+            }
+
+            chart.subscribeCrosshairMove((param) => {
+                if (!param || !param.time || !param.seriesData || !param.seriesData.has(series)) {
+                    if (result.candles.length > 0) {
+                        updateOhlcDisplay(result.candles[result.candles.length - 1]);
+                    }
+                    return;
+                }
+                const bar = param.seriesData.get(series);
+                updateOhlcDisplay(bar);
+            });
 
             activeChartsMap.set(container, chart);
 

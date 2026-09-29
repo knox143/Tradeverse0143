@@ -472,6 +472,36 @@ details > p { color: var(--muted); margin-top: 8px; font-size: 12px; }
     width: 100%;
 }
 
+/* --- Floating Live OHLC Bar --- */
+.chart-ohlc-banner {
+    position: absolute;
+    top: 8px;
+    left: 12px;
+    z-index: 5;
+    pointer-events: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 11px;
+    font-family: "DM Mono", monospace;
+    color: var(--muted);
+    background: rgba(255, 255, 255, 0.94);
+    backdrop-filter: blur(4px);
+    padding: 3px 8px;
+    border-radius: 4px;
+    border: 1px solid rgba(217, 226, 221, 0.9);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
+}
+.chart-ohlc-banner .ohlc-date strong {
+    color: var(--ink);
+    font-weight: 700;
+}
+.chart-ohlc-banner .ohlc-stat {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 3px;
+}
+
 /* --- Duration Badges & Trade Timeline --- */
 .duration-badge {
     display: inline-flex;
