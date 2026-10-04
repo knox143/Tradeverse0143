@@ -893,12 +893,76 @@
             });
         }
 
-        const menuButton = document.querySelector("[data-menu-toggle]");
+        const menuButtons = document.querySelectorAll("[data-menu-toggle]");
+        const closeButtons = document.querySelectorAll("[data-menu-close]");
         const sidebar = document.querySelector(".sidebar");
-        if (menuButton && sidebar) {
-            menuButton.addEventListener("click", () => sidebar.classList.toggle("is-open"));
-            document.querySelectorAll(".sidebar a").forEach((link) => link.addEventListener("click", () => sidebar.classList.remove("is-open")));
+        const backdrop = document.getElementById("sidebar-backdrop");
+
+        function openSidebar() {
+            if (sidebar) sidebar.classList.add("is-open");
+            if (backdrop) backdrop.classList.add("is-active");
+            document.body.classList.add("sidebar-open");
         }
+
+        function closeSidebar() {
+            if (sidebar) sidebar.classList.remove("is-open");
+            if (backdrop) backdrop.classList.remove("is-active");
+            document.body.classList.remove("sidebar-open");
+        }
+
+        function toggleSidebar(e) {
+            if (e) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+            if (sidebar && sidebar.classList.contains("is-open")) {
+                closeSidebar();
+            } else {
+                openSidebar();
+            }
+        }
+
+        menuButtons.forEach((btn) => {
+            btn.addEventListener("click", toggleSidebar);
+        });
+
+        closeButtons.forEach((btn) => {
+            btn.addEventListener("click", (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                closeSidebar();
+            });
+        });
+
+        if (backdrop) {
+            backdrop.addEventListener("click", (e) => {
+                e.preventDefault();
+                closeSidebar();
+            });
+        }
+
+        // Close when clicking anywhere on the screen outside the sidebar and toggle buttons
+        document.addEventListener("click", (e) => {
+            if (sidebar && sidebar.classList.contains("is-open")) {
+                const clickedInside = sidebar.contains(e.target);
+                const clickedToggle = Array.from(menuButtons).some((btn) => btn.contains(e.target));
+                if (!clickedInside && !clickedToggle) {
+                    closeSidebar();
+                }
+            }
+        });
+
+        // Close on Escape key
+        document.addEventListener("keydown", (e) => {
+            if (e.key === "Escape" && sidebar && sidebar.classList.contains("is-open")) {
+                closeSidebar();
+            }
+        });
+
+        // Close when clicking any navigation link inside the sidebar
+        document.querySelectorAll(".sidebar a").forEach((link) => {
+            link.addEventListener("click", () => closeSidebar());
+        });
     }
 
     document.addEventListener("DOMContentLoaded", initializePage);
