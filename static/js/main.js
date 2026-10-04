@@ -893,8 +893,13 @@
             });
         }
 
-        const menuButtons = document.querySelectorAll("[data-menu-toggle]");
-        const closeButtons = document.querySelectorAll("[data-menu-close]");
+        if (window.__workspaceDrawerReady) {
+            return;
+        }
+        window.__workspaceDrawerReady = true;
+
+        const menuButtons = document.querySelectorAll("[data-menu-toggle], #workspace-hamburger-btn");
+        const closeButtons = document.querySelectorAll("[data-menu-close], #sidebar-close-btn");
         const sidebar = document.querySelector(".sidebar");
         const backdrop = document.getElementById("sidebar-backdrop");
 
