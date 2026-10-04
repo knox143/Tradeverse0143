@@ -671,6 +671,10 @@ _session.headers.update({"User-Agent": "TradeVerse-MarketEngine/3.0"})
 
 CUSTOM_MARKET_API_URL = os.environ.get("CUSTOM_MARKET_API_URL")
 
+FINNHUB_API_KEY = os.environ.get("FINNHUB_API_KEY", "db17ushr01qhkqh8lr2gdb17ushr01qhkqh8lr30").strip()
+TWELVE_DATA_API_KEY = os.environ.get("TWELVE_DATA_API_KEY", "a39be725ae064a3584d9be4d2fb8460e").strip()
+COINGECKO_API_KEY = os.environ.get("COINGECKO_API_KEY", "CG-MVjPXU83MGtQ1BHYdjXmcAXZ").strip()
+
 BASE_STOCKS = [
     {"symbol": "RELIANCE.NS", "name": "Reliance Industries", "market": "India", "currency": "INR", "price": 1257.50, "change": 0.84, "sector": "Energy"},
     {"symbol": "TCS.NS", "name": "Tata Consultancy Services", "market": "India", "currency": "INR", "price": 3920.00, "change": -0.31, "sector": "Technology"},
@@ -764,33 +768,18 @@ def fetch_custom_quote(symbol, asset_type):
         except Exception:
             pass
 
-    # 2. Native Public Real-Time Feeds (Binance / Yahoo Finance / CoinGecko)
+    # 2. Live Market APIs: CoinGecko, Finnhub, Twelve Data, Binance, Yahoo Finance
     if not res:
         if asset_type == "crypto":
-            # Primary Crypto Feed: Binance Live Ticker
-            try:
-                resp = _session.get(f"https://api.binance.com/api/v3/ticker/24hr?symbol={sym}USDT", timeout=1.8)
-                if resp.status_code == 200:
-                    p = resp.json()
-                    price = float(p["lastPrice"])
-                    res = {
-                        "symbol": sym,
-                        "name": baseline["name"] if baseline else sym,
-                        "price": round(price, 4 if price < 1 else 2),
-                        "change": round(float(p.get("priceChangePercent", 0)), 2),
-                        "currency": "USDT",
-                        "source": "Binance Live",
-                    }
-            except Exception:
-                pass
-
-            # Secondary Crypto Feed: CoinGecko Free API
-            if not res:
-                coin_id = CRYPTO_COIN_MAP.get(sym, sym.lower())
+            # Primary Crypto Feed: CoinGecko API with key
+            coin_id = CRYPTO_COIN_MAP.get(sym, sym.lower())
+            if COINGECKO_API_KEY and coin_id:
                 try:
+                    headers = {"x-cg-demo-api-key": COINGECKO_API_KEY} if COINGECKO_API_KEY.startswith("CG-") else {"x-cg-pro-api-key": COINGECKO_API_KEY}
                     resp = _session.get(
                         f"https://api.coingecko.com/api/v3/simple/price?ids={coin_id}&vs_currencies=usd&include_24hr_change=true",
-                        timeout=2.0
+                        headers=headers,
+                        timeout=2.5
                     )
                     if resp.status_code == 200:
                         cg_data = resp.json().get(coin_id, {})
@@ -802,31 +791,119 @@ def fetch_custom_quote(symbol, asset_type):
                                 "price": round(c_p, 4 if c_p < 1 else 2),
                                 "change": round(float(cg_data.get("usd_24h_change", 0.0)), 2),
                                 "currency": "USDT",
-                                "source": "CoinGecko Free",
+                                "source": "CoinGecko API",
+                            }
+                except Exception:
+                    pass
+
+            # Secondary Crypto Feed: Binance Live Ticker
+            if not res:
+                try:
+                    resp = _session.get(f"https://api.binance.com/api/v3/ticker/24hr?symbol={sym}USDT", timeout=1.8)
+                    if resp.status_code == 200:
+                        p = resp.json()
+                        price = float(p["lastPrice"])
+                        res = {
+                            "symbol": sym,
+                            "name": baseline["name"] if baseline else sym,
+                            "price": round(price, 4 if price < 1 else 2),
+                            "change": round(float(p.get("priceChangePercent", 0)), 2),
+                            "currency": "USDT",
+                            "source": "Binance Live",
+                        }
+                except Exception:
+                    pass
+
+            # Tertiary Crypto Feed: Finnhub Crypto
+            if not res and FINNHUB_API_KEY:
+                try:
+                    resp = _session.get(
+                        f"https://finnhub.io/api/v1/quote?symbol=BINANCE:{sym}USDT&token={FINNHUB_API_KEY}",
+                        timeout=2.0
+                    )
+                    if resp.status_code == 200:
+                        p = resp.json()
+                        price = p.get("c")
+                        if price and float(price) > 0:
+                            res = {
+                                "symbol": sym,
+                                "name": baseline["name"] if baseline else sym,
+                                "price": round(float(price), 4 if float(price) < 1 else 2),
+                                "change": round(float(p.get("dp", 0.0)), 2),
+                                "currency": "USDT",
+                                "source": "Finnhub Crypto",
                             }
                 except Exception:
                     pass
         else:
-            # Equities Feed: Yahoo Finance
-            try:
-                resp = _session.get(f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}?interval=1d&range=1d", timeout=2.0)
-                if resp.status_code == 200:
-                    chart = resp.json().get("chart", {}).get("result", [{}])[0].get("meta", {})
-                    price = chart.get("regularMarketPrice")
-                    if price:
-                        prev = chart.get("chartPreviousClose") or price
-                        chg = ((float(price) - float(prev)) / float(prev) * 100) if prev else 0.0
-                        res = {
-                            "symbol": sym,
-                            "name": baseline["name"] if baseline else sym,
-                            "price": round(float(price), 2),
-                            "change": round(chg, 2),
-                            "currency": currency,
-                            "market": "India" if currency == "INR" else "Global",
-                            "source": "Yahoo Finance (Free Feed - 10-15m Delay)",
-                        }
-            except Exception:
-                pass
+            # Equities / Stocks:
+            # Primary Global Stock Feed: Finnhub API
+            if FINNHUB_API_KEY and not (sym.endswith(".NS") or sym.endswith(".BO")):
+                try:
+                    resp = _session.get(
+                        f"https://finnhub.io/api/v1/quote?symbol={sym}&token={FINNHUB_API_KEY}",
+                        timeout=2.0
+                    )
+                    if resp.status_code == 200:
+                        p = resp.json()
+                        price = p.get("c")
+                        if price and float(price) > 0:
+                            res = {
+                                "symbol": sym,
+                                "name": baseline["name"] if baseline else sym,
+                                "price": round(float(price), 2),
+                                "change": round(float(p.get("dp", 0.0)), 2),
+                                "currency": currency,
+                                "market": "Global",
+                                "source": "Finnhub API",
+                            }
+                except Exception:
+                    pass
+
+            # Secondary Global Stock Feed: Twelve Data API
+            if not res and TWELVE_DATA_API_KEY and not (sym.endswith(".NS") or sym.endswith(".BO")):
+                try:
+                    resp = _session.get(
+                        f"https://api.twelvedata.com/quote?symbol={sym}&apikey={TWELVE_DATA_API_KEY}",
+                        timeout=2.0
+                    )
+                    if resp.status_code == 200:
+                        p = resp.json()
+                        close_p = p.get("close")
+                        if close_p and p.get("status") != "error":
+                            res = {
+                                "symbol": sym,
+                                "name": baseline["name"] if baseline else (p.get("name") or sym),
+                                "price": round(float(close_p), 2),
+                                "change": round(float(p.get("percent_change", 0.0)), 2),
+                                "currency": currency,
+                                "market": "Global",
+                                "source": "Twelve Data API",
+                            }
+                except Exception:
+                    pass
+
+            # Equities Feed (Indian stocks / Fallback): Yahoo Finance
+            if not res:
+                try:
+                    resp = _session.get(f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}?interval=1d&range=1d", timeout=2.0)
+                    if resp.status_code == 200:
+                        chart = resp.json().get("chart", {}).get("result", [{}])[0].get("meta", {})
+                        price = chart.get("regularMarketPrice")
+                        if price:
+                            prev = chart.get("chartPreviousClose") or price
+                            chg = ((float(price) - float(prev)) / float(prev) * 100) if prev else 0.0
+                            res = {
+                                "symbol": sym,
+                                "name": baseline["name"] if baseline else sym,
+                                "price": round(float(price), 2),
+                                "change": round(chg, 2),
+                                "currency": currency,
+                                "market": "India" if currency == "INR" else "Global",
+                                "source": "Yahoo Finance (Free Feed - 10-15m Delay)",
+                            }
+                except Exception:
+                    pass
 
     if not res:
         res = baseline or {
@@ -903,40 +980,96 @@ def get_market_candles(symbol, asset_type, timeframe="1y"):
     candles = []
     interval = "1d"
     if asset_type == "crypto":
-        try:
-            limit = 100
-            if timeframe in ("1m", "5m", "15m", "1h"):
-                interval = timeframe
-            resp = _session.get(f"https://api.binance.com/api/v3/klines?symbol={sym}USDT&interval={interval}&limit={limit}", timeout=2.5)
-            if resp.status_code == 200:
-                data = resp.json()
-                for item in data:
-                    t = int(item[0] / 1000) if timeframe in ("1m", "5m", "15m", "1h") else datetime.fromtimestamp(item[0] / 1000).strftime("%Y-%m-%d")
-                    c = float(item[4])
-                    dec = 4 if c < 1 else 2
-                    candles.append({
-                        "time": t, "open": round(float(item[1]), dec),
-                        "high": round(float(item[2]), dec), "low": round(float(item[3]), dec),
-                        "close": round(c, dec),
-                    })
-        except Exception:
-            pass
-    else:
-        try:
-            resp = _session.get(f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}?interval=1d&range=3mo", timeout=2.5)
-            if resp.status_code == 200:
-                data = resp.json()["chart"]["result"][0]
-                ts = data.get("timestamp", [])
-                q = data.get("indicators", {}).get("quote", [{}])[0]
-                for t, o, h, l, c in zip(ts, q.get("open", []), q.get("high", []), q.get("low", []), q.get("close", [])):
-                    if None not in (o, h, l, c):
+        # 1. Primary: CoinGecko OHLC API
+        coin_id = CRYPTO_COIN_MAP.get(sym, sym.lower())
+        if COINGECKO_API_KEY and coin_id:
+            try:
+                cg_days = 30 if timeframe == "1mo" else (7 if timeframe == "1w" else (1 if timeframe in ("1d", "24h") else 365))
+                headers = {"x-cg-demo-api-key": COINGECKO_API_KEY} if COINGECKO_API_KEY.startswith("CG-") else {"x-cg-pro-api-key": COINGECKO_API_KEY}
+                resp = _session.get(
+                    f"https://api.coingecko.com/api/v3/coins/{coin_id}/ohlc?vs_currency=usd&days={cg_days}",
+                    headers=headers,
+                    timeout=3.0
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if isinstance(data, list) and len(data) > 0:
+                        for bar in data:
+                            if len(bar) >= 5:
+                                t = datetime.fromtimestamp(bar[0] / 1000).strftime("%Y-%m-%d")
+                                c = float(bar[4])
+                                dec = 4 if c < 1 else 2
+                                candles.append({
+                                    "time": t,
+                                    "open": round(float(bar[1]), dec),
+                                    "high": round(float(bar[2]), dec),
+                                    "low": round(float(bar[3]), dec),
+                                    "close": round(c, dec),
+                                })
+            except Exception:
+                pass
+
+        # 2. Secondary: Binance klines
+        if not candles:
+            try:
+                limit = 100
+                if timeframe in ("1m", "5m", "15m", "1h"):
+                    interval = timeframe
+                resp = _session.get(f"https://api.binance.com/api/v3/klines?symbol={sym}USDT&interval={interval}&limit={limit}", timeout=2.5)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    for item in data:
+                        t = int(item[0] / 1000) if timeframe in ("1m", "5m", "15m", "1h") else datetime.fromtimestamp(item[0] / 1000).strftime("%Y-%m-%d")
+                        c = float(item[4])
+                        dec = 4 if c < 1 else 2
                         candles.append({
-                            "time": datetime.fromtimestamp(t).strftime("%Y-%m-%d"),
-                            "open": round(float(o), 2), "high": round(float(h), 2),
-                            "low": round(float(l), 2), "close": round(float(c), 2),
+                            "time": t, "open": round(float(item[1]), dec),
+                            "high": round(float(item[2]), dec), "low": round(float(item[3]), dec),
+                            "close": round(c, dec),
                         })
-        except Exception:
-            pass
+            except Exception:
+                pass
+    else:
+        # Stock:
+        # 1. Primary: Twelve Data time_series for Global Stocks
+        if TWELVE_DATA_API_KEY and not (sym.endswith(".NS") or sym.endswith(".BO")):
+            try:
+                resp = _session.get(
+                    f"https://api.twelvedata.com/time_series?symbol={sym}&interval=1day&outputsize=45&apikey={TWELVE_DATA_API_KEY}",
+                    timeout=3.0
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    values = data.get("values", [])
+                    if values and isinstance(values, list):
+                        for v in reversed(values):
+                            candles.append({
+                                "time": v["datetime"].split(" ")[0],
+                                "open": round(float(v["open"]), 2),
+                                "high": round(float(v["high"]), 2),
+                                "low": round(float(v["low"]), 2),
+                                "close": round(float(v["close"]), 2),
+                            })
+            except Exception:
+                pass
+
+        # 2. Secondary: Yahoo Finance
+        if not candles:
+            try:
+                resp = _session.get(f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}?interval=1d&range=3mo", timeout=2.5)
+                if resp.status_code == 200:
+                    data = resp.json()["chart"]["result"][0]
+                    ts = data.get("timestamp", [])
+                    q = data.get("indicators", {}).get("quote", [{}])[0]
+                    for t, o, h, l, c in zip(ts, q.get("open", []), q.get("high", []), q.get("low", []), q.get("close", [])):
+                        if None not in (o, h, l, c):
+                            candles.append({
+                                "time": datetime.fromtimestamp(t).strftime("%Y-%m-%d"),
+                                "open": round(float(o), 2), "high": round(float(h), 2),
+                                "low": round(float(l), 2), "close": round(float(c), 2),
+                            })
+            except Exception:
+                pass
 
     # High-accuracy procedural fallback if network drops
     if not candles:

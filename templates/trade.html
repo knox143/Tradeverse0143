@@ -27,11 +27,11 @@
         </h2>
         <p>
             {% if active_tab == 'crypto' %}
-                Live real-time crypto prices in USDT with full candlestick patterns. Quotes powered by Binance & CoinGecko feeds.
+                Live real-time crypto prices in USDT with full candlestick patterns. Quotes powered by CoinGecko & Binance feeds.
             {% elif selected_market == 'India' %}
                 Top National Stock Exchange (NSE) Indian shares priced in ₹ INR. Full daily OHLC candlestick patterns with 10–15m exchange delay.
             {% elif selected_market == 'Global' %}
-                Top US & Global tech equities priced in USDT. Full daily OHLC candlestick patterns with 10–15m exchange delay.
+                Top US & Global tech equities priced in USDT. Full daily OHLC candlestick patterns powered by Twelve Data & Finnhub.
             {% else %}
                 Indian Stock Market (NSE in ₹ INR) and Global Equities (USDT) separated into dedicated categories.
             {% endif %}
@@ -75,7 +75,7 @@
         <div>
             <p class="eyebrow">Technical Analysis</p>
             <h2>Coin Candlestick Studio</h2>
-            <p>Select any cryptocurrency below to inspect its real-time candlestick chart powered by Binance.</p>
+            <p>Select any cryptocurrency below to inspect its real-time candlestick chart powered by CoinGecko & Binance.</p>
         </div>
         <!-- Authentic Candlestick Pattern Legend -->
         <div class="chart-legend-patterns">
@@ -117,7 +117,7 @@
                 <span id="crypto-studio-icon" class="modal-icon-wrap">{{ (items[0].symbol if items else 'BTC')|asset_icon('crypto', 36) }}</span>
                 <div>
                     <h3 id="crypto-studio-title">{{ items[0].name if items else 'Bitcoin' }} ({{ items[0].symbol if items else 'BTC' }})</h3>
-                    <p class="studio-subtext">Real-Time Binance Klines &bull; USDT Pair</p>
+                    <p class="studio-subtext">Real-Time CoinGecko OHLC Feed &bull; USDT Pair</p>
                 </div>
             </div>
             <div class="studio-header-right">
@@ -163,7 +163,7 @@
                     Stock Candlestick Studio (Indian &amp; Global)
                 {% endif %}
             </h2>
-            <p>Inspect real-time daily candlestick patterns for Indian NSE stocks (INR) and US/Global equities (USDT).</p>
+            <p>Inspect real-time daily candlestick patterns for Indian NSE stocks (INR) and US/Global equities (USDT) powered by Twelve Data.</p>
         </div>
         <!-- Authentic Candlestick Pattern Legend -->
         <div class="chart-legend-patterns">
@@ -213,7 +213,7 @@
                 <span id="stock-studio-icon" class="modal-icon-wrap">{{ (items[0].symbol if items else 'RELIANCE.NS')|asset_icon('stock', 36) }}</span>
                 <div>
                     <h3 id="stock-studio-title">{{ items[0].name if items else 'Reliance Industries' }} ({{ items[0].symbol if items else 'RELIANCE.NS' }})</h3>
-                    <p id="stock-studio-subtitle" class="studio-subtext">{% if items and items[0].currency == 'INR' %}Indian NSE &bull; Live Daily Candlesticks{% else %}Global Equities &bull; Live Daily Candlesticks{% endif %}</p>
+                    <p id="stock-studio-subtitle" class="studio-subtext">{% if items and items[0].currency == 'INR' %}Indian NSE &bull; Live Daily Candlesticks{% else %}Global Equities &bull; Twelve Data OHLC Candlesticks{% endif %}</p>
                 </div>
             </div>
             <div class="studio-header-right">
