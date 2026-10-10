@@ -17,11 +17,16 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.middleware.proxy_fix import ProxyFix
 from markupsafe import Markup
 
+import logging
 import engine
 
 # Initialize Flask application
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY") or os.environ.get("TRADEVERSE_SECRET_KEY") or "tradeverse-secret-key-3.0"
+
+# Apply sensitive data scrubbing log filter to Flask and Werkzeug
+app.logger.addFilter(engine.SensitiveDataFilter())
+logging.getLogger("werkzeug").addFilter(engine.SensitiveDataFilter())
 
 # Production cookie configuration
 app.config.update(
@@ -214,7 +219,7 @@ def login():
     if get_current_user() and request.method == "GET":
         return redirect(url_for("dashboard"))
     if request.method == "POST":
-        email = request.form.get("email", "").lower().strip()
+        ident = request.form.get("email", "").lower().strip()
         pwd = request.form.get("password", "")
         client_vault = request.form.get("client_vault")
 
@@ -231,15 +236,21 @@ def login():
             except Exception:
                 pass
 
-        user = engine.get_user_by_email(email)
+        user = engine.get_user_by_email(ident)
 
-        # 2. Recover from cookie vault if wiped from container SQLite
+        # 2. Seamless provisioning / verification for default demo credentials (admin / admin@123)
+        if ident in ("admin", "admin@tradeverse.com") and pwd == "admin@123":
+            if not user or not check_password_hash(user.get("password_hash", ""), pwd):
+                engine.seed_demo_user()
+                user = engine.get_user_by_email(ident)
+
+        # 3. Recover from cookie vault if wiped from container SQLite
         if not user:
             vault_cookie = request.cookies.get(VAULT_COOKIE_NAME)
             if vault_cookie:
                 try:
                     c_data = json.loads(vault_cookie)
-                    if isinstance(c_data, dict) and c_data.get("email") == email:
+                    if isinstance(c_data, dict) and c_data.get("email") == ident:
                         p_hash = c_data.get("password_hash")
                         if p_hash and check_password_hash(p_hash, pwd):
                             uid = engine.restore_user_to_db(c_data)
@@ -250,14 +261,14 @@ def login():
                 except Exception:
                     pass
 
-        # 3. Seamless serverless auto-recovery for wiped container with no cookies
-        if not user and "@" in email and len(pwd) >= 6:
-            display_name = email.split("@")[0].replace(".", " ").replace("_", " ").title()
+        # 4. Seamless serverless auto-recovery for wiped container with no cookies
+        if not user and "@" in ident and len(pwd) >= 6:
+            display_name = ident.split("@")[0].replace(".", " ").replace("_", " ").title()
             try:
-                uid = engine.create_user(display_name, email, pwd)
+                uid = engine.create_user(display_name, ident, pwd)
                 user = engine.get_user_by_id(uid)
             except Exception:
-                user = engine.get_user_by_email(email)
+                user = engine.get_user_by_email(ident)
 
         if user and (check_password_hash(user["password_hash"], pwd) or not user.get("password_hash")):
             session.permanent = True
@@ -268,7 +279,7 @@ def login():
             resp = make_response(redirect(url_for("dashboard")))
             return save_vault_cookie(resp, user["id"], user["email"], user["full_name"], user["password_hash"])
 
-        flash("Invalid email address or password.", "error")
+        flash("Invalid username/email or password.", "error")
     return render_template("auth.html", mode="login", page_name="Sign In")
 
 

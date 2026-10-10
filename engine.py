@@ -26,8 +26,41 @@ import logging
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
-# Engine logger initialization
+# Sensitive Data Scrubbing Log Filter
+SENSITIVE_PATTERNS = [
+    (re.compile(r'(password(?:_hash)?["\'\s:=]+)(["\']?)([^"\'\s&,]+)\2', re.IGNORECASE), r'\1\2[REDACTED]\2'),
+    (re.compile(r'(pwd["\'\s:=]+)(["\']?)([^"\'\s&,]+)\2', re.IGNORECASE), r'\1\2[REDACTED]\2'),
+    (re.compile(r'((?:api[_-]?key|token|secret|x-cg-(?:demo|pro)-api-key)["\'\s:=]+)(["\']?)([^"\'\s&,]+)\2', re.IGNORECASE), r'\1\2[REDACTED]\2'),
+    (re.compile(r'(smtp_pass["\'\s:=]+)(["\']?)([^"\'\s&,]+)\2', re.IGNORECASE), r'\1\2[REDACTED]\2'),
+    (re.compile(r'(://[^:\s]+:)([^@\s]+)(@)', re.IGNORECASE), r'\1[REDACTED]\3'),
+    (re.compile(r'(Authorization:\s*(?:Bearer|Basic)\s+)[^\r\n]+', re.IGNORECASE), r'\1[REDACTED]'),
+    (re.compile(r'(tv_account_vault=|session=)[^;\s]+', re.IGNORECASE), r'\1[REDACTED]'),
+    (re.compile(r'(\b(?:otp|verification code|code)[:\s=]+)(\d{4,6})\b', re.IGNORECASE), r'\1[REDACTED]'),
+]
+
+class SensitiveDataFilter(logging.Filter):
+    """Scrub passwords, tokens, API keys, and auth secrets from log records."""
+    def _sanitize(self, val):
+        if not isinstance(val, str):
+            val = str(val)
+        for pattern, repl in SENSITIVE_PATTERNS:
+            val = pattern.sub(repl, val)
+        return val
+
+    def filter(self, record):
+        if isinstance(record.msg, str):
+            record.msg = self._sanitize(record.msg)
+        if record.args:
+            if isinstance(record.args, dict):
+                record.args = {k: self._sanitize(v) for k, v in record.args.items()}
+            elif isinstance(record.args, (list, tuple)):
+                record.args = tuple(self._sanitize(v) for v in record.args)
+        return True
+
+# Engine logger initialization with sensitive data redaction
 logger = logging.getLogger("tradeverse.engine")
+logger.addFilter(SensitiveDataFilter())
+logging.getLogger().addFilter(SensitiveDataFilter())
 
 # ==============================================================================
 # SECTION 1: DATABASE POOL & CONCURRENT ACCESS (PostgreSQL + SQLite Fallback)
@@ -274,8 +307,47 @@ def init_db():
 
 
 def seed_demo_user():
-    """Ensure at least one demo user exists."""
-    u = query_db("SELECT id FROM users WHERE email = %s", ("demo@tradeverse.com",), fetchone=True)
+    """Ensure default demo credentials (admin: admin@123) and demo trader exist."""
+    admin_hash = generate_password_hash("admin@123")
+
+    # 1. Default Demo Credentials: Username admin, Password admin@123
+    admin_user = query_db(
+        "SELECT id, password_hash FROM users WHERE LOWER(email) = 'admin' OR LOWER(email) = 'admin@tradeverse.com'",
+        fetchone=True
+    )
+    if not admin_user:
+        if _IS_POSTGRES:
+            res = query_db(
+                "INSERT INTO users (full_name, email, password_hash) VALUES (%s, %s, %s) RETURNING id",
+                ("Administrator", "admin", admin_hash), fetchone=True, commit=True
+            )
+            admin_id = res["id"]
+        else:
+            with get_db() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    "INSERT INTO users (full_name, email, password_hash) VALUES (?, ?, ?)",
+                    ("Administrator", "admin", admin_hash)
+                )
+                admin_id = cur.lastrowid
+                conn.commit()
+        query_db(
+            "INSERT INTO wallet (user_id, inr_balance, usdt_balance, cash_balance) VALUES (%s, %s, %s, %s) "
+            "ON CONFLICT (user_id) DO UPDATE SET inr_balance = EXCLUDED.inr_balance, usdt_balance = EXCLUDED.usdt_balance"
+            if _IS_POSTGRES else
+            "INSERT OR REPLACE INTO wallet (user_id, inr_balance, usdt_balance, cash_balance) VALUES (%s, %s, %s, %s)",
+            (admin_id, STARTING_INR_BALANCE, STARTING_USDT_BALANCE, STARTING_INR_BALANCE), commit=True
+        )
+    else:
+        # Guarantee admin password hash matches admin@123
+        if not check_password_hash(admin_user.get("password_hash", ""), "admin@123"):
+            query_db(
+                "UPDATE users SET password_hash = %s WHERE id = %s",
+                (admin_hash, admin_user["id"]), commit=True
+            )
+
+    # 2. Demo Trader: demo@tradeverse.com, password123
+    u = query_db("SELECT id FROM users WHERE LOWER(email) = 'demo@tradeverse.com'", fetchone=True)
     if not u:
         h = generate_password_hash("password123")
         if _IS_POSTGRES:
@@ -289,8 +361,13 @@ def seed_demo_user():
                             ("Demo Trader", "demo@tradeverse.com", h))
                 uid = cur.lastrowid
                 conn.commit()
-        query_db("INSERT INTO wallet (user_id, inr_balance, usdt_balance, cash_balance) VALUES (%s, %s, %s, %s)",
-                 (uid, STARTING_INR_BALANCE, STARTING_USDT_BALANCE, STARTING_INR_BALANCE), commit=True)
+        query_db(
+            "INSERT INTO wallet (user_id, inr_balance, usdt_balance, cash_balance) VALUES (%s, %s, %s, %s) "
+            "ON CONFLICT (user_id) DO UPDATE SET inr_balance = EXCLUDED.inr_balance, usdt_balance = EXCLUDED.usdt_balance"
+            if _IS_POSTGRES else
+            "INSERT OR REPLACE INTO wallet (user_id, inr_balance, usdt_balance, cash_balance) VALUES (%s, %s, %s, %s)",
+            (uid, STARTING_INR_BALANCE, STARTING_USDT_BALANCE, STARTING_INR_BALANCE), commit=True
+        )
 
 
 # Initialize DB on load
@@ -398,10 +475,10 @@ def send_otp_email(to_email, otp, full_name="Trader"):
                     server.send_message(msg)
                 return {"sent": True, "dev_mode": False}
         except Exception as e:
-            logger.warning(f"SMTP delivery failed ({e}). Falling back to dev mode OTP.")
-            return {"sent": True, "dev_mode": True, "otp": otp, "error": str(e)}
+            logger.warning("SMTP delivery failed. Falling back to dev mode OTP.")
+            return {"sent": True, "dev_mode": True, "otp": otp, "error": "SMTP delivery issue"}
     else:
-        logger.info(f"[TradeVerse OTP] Verification code for {to_email}: {otp}")
+        logger.info(f"[TradeVerse OTP] Verification code dispatched for {to_email} [REDACTED]")
         return {"sent": True, "dev_mode": True, "otp": otp}
 
 
@@ -440,7 +517,16 @@ def create_user(full_name, email, password, is_hashed=False):
 
 
 def get_user_by_email(email):
-    return query_db("SELECT * FROM users WHERE email = %s", ((email or "").lower().strip(),), fetchone=True)
+    cleaned = (email or "").lower().strip()
+    if not cleaned:
+        return None
+    user = query_db("SELECT * FROM users WHERE LOWER(email) = %s", (cleaned,), fetchone=True)
+    if not user:
+        if cleaned == "admin":
+            user = query_db("SELECT * FROM users WHERE LOWER(email) = 'admin@tradeverse.com'", fetchone=True)
+        elif cleaned == "admin@tradeverse.com":
+            user = query_db("SELECT * FROM users WHERE LOWER(email) = 'admin'", fetchone=True)
+    return user
 
 
 def get_user_by_id(user_id):

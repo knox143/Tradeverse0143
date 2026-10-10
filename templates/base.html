@@ -144,8 +144,137 @@
         z-index: 100 !important;
     }
     .topbar > div:first-of-type { margin-right: auto !important; }
+    .topbar-right {
+        display: flex !important;
+        align-items: center !important;
+        gap: 12px !important;
+        margin-left: auto !important;
+    }
+    .topbar-user-menu {
+        display: flex !important;
+        align-items: center !important;
+        gap: 8px !important;
+    }
+    .topbar-user-pill {
+        display: inline-flex !important;
+        align-items: center !important;
+        gap: 7px !important;
+        padding: 5px 12px 5px 6px !important;
+        border-radius: 20px !important;
+        background: #f0f7f4 !important;
+        border: 1px solid #dce4e1 !important;
+        color: #14312a !important;
+        font-size: 12px !important;
+        font-weight: 700 !important;
+        text-decoration: none !important;
+        transition: all .18s ease !important;
+    }
+    .topbar-user-pill:hover {
+        background: #e2f1ec !important;
+        border-color: #007d70 !important;
+    }
+    .avatar-mini {
+        width: 24px !important;
+        height: 24px !important;
+        border-radius: 50% !important;
+        background: #e09b13 !important;
+        color: #1a1f12 !important;
+        display: inline-grid !important;
+        place-items: center !important;
+        font-size: 11px !important;
+        font-weight: 800 !important;
+    }
+    .topbar-logout-btn {
+        display: inline-flex !important;
+        align-items: center !important;
+        gap: 6px !important;
+        padding: 7px 13px !important;
+        border-radius: 6px !important;
+        background: #ffffff !important;
+        border: 1.5px solid #dce4e1 !important;
+        color: #c94d3d !important;
+        font-size: 12px !important;
+        font-weight: 700 !important;
+        text-decoration: none !important;
+        cursor: pointer !important;
+        transition: all .18s ease !important;
+    }
+    .topbar-logout-btn:hover {
+        background: #fdf2f0 !important;
+        border-color: #c94d3d !important;
+        color: #b3392a !important;
+        transform: translateY(-1px) !important;
+        box-shadow: 0 2px 6px rgba(201, 77, 61, 0.15) !important;
+    }
+    .topbar-logout-btn svg {
+        width: 15px !important;
+        height: 15px !important;
+    }
+    .demo-credentials-box {
+        margin-bottom: 18px !important;
+        padding: 12px 14px !important;
+        background: #f0f7f4 !important;
+        border: 1.5px solid #bfe0d6 !important;
+        border-radius: 8px !important;
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 8px !important;
+    }
+    .demo-cred-header {
+        display: flex !important;
+        align-items: center !important;
+        justify-content: space-between !important;
+    }
+    .demo-cred-tag {
+        display: inline-flex !important;
+        align-items: center !important;
+        gap: 5px !important;
+        font-size: 11px !important;
+        font-weight: 800 !important;
+        color: #007d70 !important;
+        text-transform: uppercase !important;
+        letter-spacing: .05em !important;
+    }
+    .demo-cred-tag svg { width: 14px !important; height: 14px !important; }
+    .demo-fill-button {
+        display: inline-flex !important;
+        align-items: center !important;
+        gap: 5px !important;
+        padding: 4px 10px !important;
+        border-radius: 5px !important;
+        background: #007d70 !important;
+        color: #ffffff !important;
+        border: 0 !important;
+        font-size: 11px !important;
+        font-weight: 800 !important;
+        cursor: pointer !important;
+        transition: all .15s ease !important;
+    }
+    .demo-fill-button:hover {
+        background: #123f37 !important;
+        transform: translateY(-1px) !important;
+    }
+    .demo-fill-button svg { width: 12px !important; height: 12px !important; }
+    .demo-cred-details {
+        display: flex !important;
+        align-items: center !important;
+        gap: 16px !important;
+        font-size: 12px !important;
+        color: #14312a !important;
+        flex-wrap: wrap !important;
+    }
+    .demo-cred-details strong {
+        font-family: "DM Mono", monospace !important;
+        color: #123f37 !important;
+        background: rgba(0, 125, 112, 0.12) !important;
+        padding: 2px 6px !important;
+        border-radius: 4px !important;
+    }
     @media (max-width: 620px) {
         .topbar { padding: 12px 16px !important; min-height: 68px !important; }
+        .topbar-user-name { display: none !important; }
+        .topbar-logout-btn span { display: none !important; }
+        .topbar-logout-btn { padding: 7px 9px !important; }
     }
     </style>
     {% if current_user %}
@@ -206,7 +335,19 @@
                     <p class="eyebrow">Paper trading workspace</p>
                     <h1>{{ page_name }}</h1>
                 </div>
-                <div class="market-status" title="Market quotes are provided by free tier exchange feeds (10–15 minutes delayed)"><span class="status-dot"></span><span>Practice Market</span><span class="market-delay-badge"><i data-lucide="clock"></i>10–15m Delayed</span></div>
+                <div class="topbar-right">
+                    <div class="market-status" title="Market quotes are provided by free tier exchange feeds (10–15 minutes delayed)"><span class="status-dot"></span><span>Practice Market</span><span class="market-delay-badge"><i data-lucide="clock"></i>10–15m Delayed</span></div>
+                    <div class="topbar-user-menu">
+                        <a href="{{ url_for('profile') }}" class="topbar-user-pill" title="View Profile ({{ current_user['full_name'] }})">
+                            <span class="avatar-mini">{{ current_user['full_name'][0]|upper }}</span>
+                            <span class="topbar-user-name">{{ current_user['full_name'].split(' ')[0] }}</span>
+                        </a>
+                        <a href="{{ url_for('logout') }}" class="topbar-logout-btn" title="Sign out of TradeVerse" aria-label="Sign out">
+                            <i data-lucide="log-out"></i>
+                            <span>Log out</span>
+                        </a>
+                    </div>
+                </div>
             </header>
             <main class="page-content">
                 {% with messages = get_flashed_messages(with_categories=true) %}
